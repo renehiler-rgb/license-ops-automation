@@ -41,5 +41,6 @@ SELECT COALESCE(e.team, 'Unknown')       AS team,
        sum(u.spend_usd)                  AS spend_usd
 FROM usage_daily u
 JOIN accounts a        ON a.id = u.account_id
-LEFT JOIN employees e  ON lower(e.email) = lower(a.email)
+-- lower-case, and drop a "+tag" so ana+alias@x matches ana@x
+LEFT JOIN employees e  ON lower(e.email) = regexp_replace(lower(a.email), '\+[^@]*@', '@')
 GROUP BY COALESCE(e.team, 'Unknown'), a.tool_id, date_trunc('month', u.day)::date;
