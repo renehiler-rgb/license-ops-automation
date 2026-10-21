@@ -1,5 +1,24 @@
+# Secrets and local config
 .env
-.venv/
+
+# Generated data (keep the README)
+data/*
+!data/README.md
+
+# Python
 __pycache__/
+*.pyc
+.venv/
+
+# n8n runtime data
+n8n_data/
+
+# Legacy workflow exports
+*-legacy.json
+
+# Existing entries kept from before
 *.log
 plan/
+
+# Local-only guide
+docs/setup-steps.md
