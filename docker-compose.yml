@@ -1,0 +1,67 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.43.8
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    env_file: .env
+    environment:
+      - GENERIC_TIMEZONE=Europe/Belgrade
+      - TZ=Europe/Belgrade
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-vendors:
+        condition: service_healthy
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: licenseops
+      POSTGRES_USER: licenseops
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U licenseops -d licenseops"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mock-vendors:
+    build: ./mock-vendors
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/data:ro
+    environment:
+      CHAOS_RATE: ${CHAOS_RATE:-0.05}
+      HR_API_KEY: ${HR_API_KEY}
+      CHATTERLY_API_KEY: ${CHATTERLY_API_KEY}
+      DESIGNHUB_API_KEY: ${DESIGNHUB_API_KEY}
+      CODEFORGE_CLIENT_ID: ${CODEFORGE_CLIENT_ID}
+      CODEFORGE_CLIENT_SECRET: ${CODEFORGE_CLIENT_SECRET}
+      MEETSPACE_CLIENT_ID: ${MEETSPACE_CLIENT_ID}
+      MEETSPACE_CLIENT_SECRET: ${MEETSPACE_CLIENT_SECRET}
+    healthcheck:
+      # the slim image has no curl, so use Python
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  # Existing volume from the old ~/n8n stack (keeps workflows and credentials)
+  n8n_data:
+    external: true
+    name: n8n_n8n_data
+  pg_data:
