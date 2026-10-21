@@ -1,0 +1,11 @@
+product_id,name,vendor,license_type,unit_cost_eur_month,owner,roles
+P01,Salesforce Sales Cloud,Salesforce,per seat,140,it-licensing@northwind.example,Account Executive; SDR
+P02,LinkedIn Sales Navigator,LinkedIn,per seat,90,it-licensing@northwind.example,Account Executive; SDR
+P03,Gong,Gong,per seat,110,it-licensing@northwind.example,Account Executive
+P04,HubSpot Marketing Hub,HubSpot,per seat,75,it-licensing@northwind.example,Content Marketer
+P05,Canva Teams,Canva,per seat,12,it-licensing@northwind.example,Content Marketer; HR Partner
+P06,Jira Software,Atlassian,per seat,8,it-licensing@northwind.example,Software Engineer; Financial Analyst
+P07,GitHub Enterprise,GitHub,per seat,20,it-licensing@northwind.example,Software Engineer
+P08,Zendesk Suite,Zendesk,per seat,85,it-licensing@northwind.example,CS Manager
+P09,Claude Team,Anthropic,per seat,28,it-licensing@northwind.example,Account Executive; SDR; Content Marketer; Financial Analyst; Software Engineer; CS Manager; HR Partner
+P10,Slack Business+,Slack,per seat,12,it-licensing@northwind.example,Account Executive; SDR; Content Marketer; Financial Analyst; Software Engineer; CS Manager; HR Partner

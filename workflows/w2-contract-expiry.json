@@ -1,0 +1,187 @@
+{
+  "name": "W2 – Contract expiry alerts",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "rule": { "interval": [ { "field": "days", "triggerAtHour": 8 } ] }
+      },
+      "id": "a2",
+      "name": "Every day 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 200]
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "" },
+        "options": {}
+      },
+      "id": "a3",
+      "name": "Read Contracts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [240, 100]
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "" },
+        "options": {}
+      },
+      "id": "a4",
+      "name": "Read Catalogue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 100],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "" },
+        "options": {}
+      },
+      "id": "a5",
+      "name": "Read Run Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [680, 100],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Finds contracts whose notice deadline is within 90, 60 or 30 days\n// and skips any alert already recorded in the Run Log.\nconst tz = 'Europe/Belgrade';\nconst DAY = 86400000;\nconst toDay = s => Date.parse(String(s).slice(0, 10) + 'T00:00:00Z');\nconst today = toDay(new Date().toLocaleDateString('en-CA', { timeZone: tz }));\n\nconst products = {};\nfor (const p of $('Read Catalogue').all()) products[p.json.product_id] = p.json;\n\nconst alreadyDone = new Set(\n  $('Read Run Log').all().map(r => r.json.item_key).filter(Boolean)\n);\n\nconst out = [];\nfor (const row of $('Read Contracts').all()) {\n  const c = row.json;\n  if (!c.contract_id) continue;\n  const deadline = toDay(c.renewal_date) - Number(c.notice_days) * DAY;\n  const daysLeft = Math.round((deadline - today) / DAY);\n  if (daysLeft < 0 || daysLeft > 90) continue;\n  const threshold = [30, 60, 90].find(t => daysLeft <= t);\n  const itemKey = `W2|${c.contract_id}|${threshold}`;\n  if (alreadyDone.has(itemKey)) continue;\n  const p = products[c.product_id] || {};\n  out.push({ json: {\n    item_key: itemKey,\n    contract_id: c.contract_id,\n    product: p.name || c.product_id,\n    vendor: p.vendor || '',\n    seats: Number(c.seats),\n    renewal_date: String(c.renewal_date).slice(0, 10),\n    notice_deadline: new Date(deadline).toISOString().slice(0, 10),\n    days_left: daysLeft,\n    threshold,\n    annual_value_eur: Number(c.annual_value_eur),\n    owner_email: c.owner_email,\n    create_ticket: threshold === 90\n  }});\n}\nreturn out;"
+      },
+      "id": "a6",
+      "name": "Find due contracts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.create_ticket }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a7",
+      "name": "90 days out?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 100]
+    },
+    {
+      "parameters": {
+        "project": { "__rl": true, "mode": "list", "value": "" },
+        "issueType": { "__rl": true, "mode": "list", "value": "" },
+        "summary": "=Renewal review: {{ $json.product }} ({{ $json.contract_id }}) – notice by {{ $json.notice_deadline }}",
+        "additionalFields": {
+          "description": "=Contract {{ $json.contract_id }} for {{ $json.product }} ({{ $json.vendor }}) renews on {{ $json.renewal_date }}.\nNotice deadline: {{ $json.notice_deadline }} ({{ $json.days_left }} days).\nSeats: {{ $json.seats }} · Annual value: EUR {{ $json.annual_value_eur }}\nOwner: {{ $json.owner_email }}\n\nPlease review usage and decide: renew, resize or cancel.\nCreated automatically by n8n (W2)."
+        }
+      },
+      "id": "a8",
+      "name": "Create Jira renewal ticket",
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [1340, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Combines the contract with the Jira ticket (if one was created)\n// and writes the Slack message.\nconst c = $('Find due contracts').item.json;\nconst ticket = $json.key || '';\nconst value = c.annual_value_eur.toLocaleString('en-US');\nconst message =\n  `:warning: *${c.product}* (${c.vendor}) contract ${c.contract_id}: notice deadline in *${c.days_left} days* (${c.notice_deadline}).\\n` +\n  `${c.seats} seats · EUR ${value}/yr · Owner: ${c.owner_email}\\n` +\n  (ticket ? `:ticket: Renewal review opened: *${ticket}*` : `Renewal review was opened at the 90-day mark.`);\nreturn { json: { ...c, ticket_key: ticket, message } };"
+      },
+      "id": "a9",
+      "name": "Build alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 100]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": { "__rl": true, "mode": "list", "value": "" },
+        "text": "={{ $json.message }}",
+        "otherOptions": {}
+      },
+      "id": "a10",
+      "name": "Post to #procurement",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1780, 100]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "s1", "name": "run_id", "value": "={{ $execution.id }}", "type": "string" },
+            { "id": "s2", "name": "workflow", "value": "W2 contract expiry", "type": "string" },
+            { "id": "s3", "name": "item_key", "value": "={{ $('Build alert').item.json.item_key }}", "type": "string" },
+            { "id": "s4", "name": "action", "value": "={{ $('Build alert').item.json.ticket_key ? 'alert + ticket' : 'alert' }}", "type": "string" },
+            { "id": "s5", "name": "ticket_key", "value": "={{ $('Build alert').item.json.ticket_key }}", "type": "string" },
+            { "id": "s6", "name": "timestamp", "value": "={{ $now.toISO() }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a11",
+      "name": "Log row",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2000, 100]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "" },
+        "columns": { "mappingMode": "autoMapInputData", "value": {}, "matchingColumns": [], "schema": [] },
+        "options": {}
+      },
+      "id": "a12",
+      "name": "Append to Run Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2220, 100]
+    }
+  ],
+  "connections": {
+    "Run manually": { "main": [ [ { "node": "Read Contracts", "type": "main", "index": 0 } ] ] },
+    "Every day 08:00": { "main": [ [ { "node": "Read Contracts", "type": "main", "index": 0 } ] ] },
+    "Read Contracts": { "main": [ [ { "node": "Read Catalogue", "type": "main", "index": 0 } ] ] },
+    "Read Catalogue": { "main": [ [ { "node": "Read Run Log", "type": "main", "index": 0 } ] ] },
+    "Read Run Log": { "main": [ [ { "node": "Find due contracts", "type": "main", "index": 0 } ] ] },
+    "Find due contracts": { "main": [ [ { "node": "90 days out?", "type": "main", "index": 0 } ] ] },
+    "90 days out?": {
+      "main": [
+        [ { "node": "Create Jira renewal ticket", "type": "main", "index": 0 } ],
+        [ { "node": "Build alert", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Create Jira renewal ticket": { "main": [ [ { "node": "Build alert", "type": "main", "index": 0 } ] ] },
+    "Build alert": { "main": [ [ { "node": "Post to #procurement", "type": "main", "index": 0 } ] ] },
+    "Post to #procurement": { "main": [ [ { "node": "Log row", "type": "main", "index": 0 } ] ] },
+    "Log row": { "main": [ [ { "node": "Append to Run Log", "type": "main", "index": 0 } ] ] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Europe/Belgrade" },
+  "pinData": {}
+}
