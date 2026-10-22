@@ -524,6 +524,481 @@
         1250,
         300
       ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "cdgAF4motzMJqhNh",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "start",
+            "workflow": "={{ $workflow.name }}",
+            "execution_id": "={{ String($execution.id) }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "name": "Run log start",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        330,
+        100
+      ],
+      "id": "4d9dc972-3591-4c06-bd2b-97124ada7d15"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Normalise employees\"  (mode: Run Once for All Items)\n// Input : the pages from the \"HR employees\" HTTP node (one item per page, each with an \"employees\" list).\n// Output: ONE item { employees, rejected, items_in, items_out } -> feeds \"Upsert employees\".\n// Anything that fails validation goes to \"rejected\" (it is stored in dead_letter, not dropped).\n\nconst employees = [];\nconst rejected = [];\nlet itemsIn = 0;\n\n// \"2024-01-15\" -> \"2024-01-15\", null/empty -> null, anything else -> undefined (= invalid)\nfunction cleanDate(value) {\n  if (value === null || value === undefined || value === '') return null;\n  const ok = /^\\d{4}-\\d{2}-\\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));\n  return ok ? value : undefined;\n}\n\nfor (const page of $input.all()) {\n  for (const raw of page.json.employees ?? []) {\n    itemsIn += 1;\n\n    const email = String(raw.email ?? '').trim().toLowerCase();\n    const status = String(raw.employment_status ?? '').trim().toLowerCase();   // ACTIVE -> active\n    const startDate = cleanDate(raw.hire_date);\n    const endDate = cleanDate(raw.termination_date);\n\n    let reason = null;\n    if (!email.includes('@')) reason = 'missing or invalid email';\n    else if (!raw.full_name) reason = 'missing name';\n    else if (!raw.department) reason = 'missing department';\n    else if (!['active', 'terminated'].includes(status)) reason = `unknown status \"${raw.employment_status}\"`;\n    else if (startDate === undefined || endDate === undefined) reason = 'unparseable date';\n\n    if (reason) {\n      rejected.push({ item: raw, reason });\n      continue;\n    }\n    employees.push({\n      email,\n      name: String(raw.full_name).trim(),\n      team: String(raw.department).trim(),\n      cost_center: raw.cost_center ?? null,\n      status,\n      start_date: startDate,\n      end_date: endDate,\n    });\n  }\n}\n\nreturn [{ json: { employees, rejected, items_in: itemsIn, items_out: employees.length } }];\n"
+      },
+      "name": "Normalise employees",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        100
+      ],
+      "id": "47bcf933-940e-498f-8dec-baa740551a9d"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Upsert employees\" node. $1 = JSON array from \"Normalise employees\" ({{ [JSON.stringify($json.employees)] }}).\nWITH up AS (\n    INSERT INTO employees (email, name, team, cost_center, status, start_date, end_date)\n    SELECT e.email, e.name, e.team, e.cost_center, e.status, e.start_date, e.end_date\n    FROM jsonb_to_recordset($1::jsonb) AS e(\n        email text, name text, team text, cost_center text,\n        status text, start_date date, end_date date)\n    ON CONFLICT (email) DO UPDATE SET\n        name        = EXCLUDED.name,\n        team        = EXCLUDED.team,\n        cost_center = EXCLUDED.cost_center,\n        status      = EXCLUDED.status,\n        start_date  = EXCLUDED.start_date,\n        end_date    = EXCLUDED.end_date\n    RETURNING (xmax = 0) AS inserted        -- xmax = 0 means the row was newly inserted\n)\nSELECT count(*) FILTER (WHERE inserted)     AS inserted,\n       count(*) FILTER (WHERE NOT inserted) AS updated\nFROM up;\n",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($json.employees)] }}"
+        }
+      },
+      "name": "Upsert employees",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1180,
+        100
+      ],
+      "id": "4586293a-e02d-4c41-9c70-d4bfc893971a",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Rejected to dead_letter\" node. $1 = rejected array, $2 = Code node name (e.g. 'Normalise accounts').\n-- Same rejected item twice (while still open) is stored once, so re-runs do not pile up.\nINSERT INTO dead_letter (workflow, node, payload, error)\nSELECT 'A - Usage audit', $2, r.item, r.reason\nFROM jsonb_to_recordset($1::jsonb) AS r(item jsonb, reason text)\nWHERE NOT EXISTS (\n    SELECT 1 FROM dead_letter d\n    WHERE d.workflow = 'A - Usage audit' AND d.node = $2\n      AND d.payload = r.item AND d.status = 'open'\n);\n",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($json.rejected), 'Normalise employees'] }}"
+        }
+      },
+      "name": "Rejected employees",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1180,
+        -60
+      ],
+      "id": "d5c55c52-e40d-449c-a9b5-dfdb60d7976b",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 10
+      },
+      "name": "Wait for all",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1500,
+        330
+      ],
+      "id": "3a19c89c-2cd6-4be1-883c-eba3becfebb6"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Normalise accounts\"  (mode: Run Once for All Items)\n// Reads the four vendor user lists BY NODE NAME, so the HTTP nodes must be called exactly:\n//   \"Chatterly users\", \"DesignHub users\", \"CodeForge members\", \"MeetSpace members\"\n// Each vendor uses different field names and date formats; this maps all of them to one shape:\n//   { tool, external_id, email, seat_type, status, created_at, last_active_at }\n// Output: ONE item { accounts, rejected, vendors, items_in, items_out }.\n//   vendors tells the digest which vendors answered, e.g. { chatterly: { ok: true, count: 122 }, ... }\n\n// ---- date helpers: each returns an ISO timestamp string, or null if the value is not a valid date ----\nfunction fromEpochSeconds(n) { return toIso(typeof n === 'number' ? new Date(n * 1000) : null); }\nfunction fromEpochMillis(n) { return toIso(typeof n === 'number' ? new Date(n) : null); }\nfunction fromText(s) {\n  // \"2024-12-17 09:01:00\" (DesignHub, UTC) needs a \"T\" and a \"Z\"; \"2024-01-17T09:19:00Z\" already has them\n  if (typeof s !== 'string') return null;\n  const text = s.includes('T') ? s : s.replace(' ', 'T') + 'Z';\n  return toIso(new Date(text));\n}\nfunction toIso(date) { return date && !Number.isNaN(date.getTime()) ? date.toISOString() : null; }\n\n// ---- one entry per vendor: where its list is, and how to turn one record into our shape ----\nconst VENDORS = [\n  {\n    tool: 'chatterly', node: 'Chatterly users', list: (p) => p.data,\n    map: (u) => ({\n      external_id: u.user_id, email: u.email,\n      seat_type: u.plan === 'pro' ? 'premium' : 'standard',\n      status: u.state === 'active' ? 'active' : 'inactive',\n      created_at: fromEpochSeconds(u.created), last_active_at: fromEpochSeconds(u.last_seen),\n    }),\n  },\n  {\n    tool: 'designhub', node: 'DesignHub users', list: (p) => p.items,\n    map: (u) => ({\n      external_id: u.id, email: u.email_address,\n      seat_type: u.role === 'creator' ? 'premium' : 'standard',\n      status: u.is_active ? 'active' : 'inactive',\n      created_at: fromText(u.joined_at), last_active_at: fromText(u.last_login),\n    }),\n  },\n  {\n    tool: 'codeforge', node: 'CodeForge members', list: (p) => p.members,\n    map: (u) => ({\n      external_id: u.member_id, email: u.login,\n      seat_type: u.license === 'enterprise' ? 'premium' : 'standard',\n      status: u.suspended ? 'inactive' : 'active',\n      created_at: fromText(u.joined), last_active_at: fromText(u.last_activity),\n    }),\n  },\n  {\n    tool: 'meetspace', node: 'MeetSpace members', list: (p) => p.results,\n    map: (u) => ({\n      external_id: u.uid, email: u.mail,\n      seat_type: u.tier === 'host' ? 'premium' : 'standard',\n      status: String(u.status).toUpperCase() === 'ACTIVE' ? 'active' : 'inactive',\n      created_at: fromEpochMillis(u.created_at), last_active_at: fromEpochMillis(u.last_active_at),\n    }),\n  },\n];\n\n// Items of a node by name. A vendor that failed has no items (or never ran), which is not an error here.\nfunction pagesOf(nodeName) {\n  try { return $(nodeName).all().map((i) => i.json); } catch (e) { return []; }\n}\n\nconst accounts = [];\nconst rejected = [];\nconst vendors = {};\nconst seen = new Set();\nlet itemsIn = 0;\n\nfor (const vendor of VENDORS) {\n  const pages = pagesOf(vendor.node);\n  // A page without the vendor's list is an error body (for example {\"detail\": \"Too many requests\"}), not data.\n  const hasAllLists = pages.every((page) => Array.isArray(vendor.list(page)));\n  vendors[vendor.tool] = { ok: pages.length > 0 && hasAllLists, count: 0 };\n  if (!hasAllLists) continue;                // do not use half a vendor; the digest reports it as failed\n\n  for (const page of pages) {\n    for (const raw of vendor.list(page)) {\n      itemsIn += 1;\n      const account = { tool: vendor.tool, ...vendor.map(raw) };\n      const email = String(account.email ?? '').trim().toLowerCase();\n\n      let reason = null;\n      if (!account.external_id) reason = 'missing external_id';\n      else if (!email.includes('@')) reason = 'missing or invalid email';\n      else if (!account.created_at) reason = 'unparseable created date';\n      else if (!account.last_active_at) reason = 'unparseable last-active date';\n      else if (seen.has(`${vendor.tool}|${account.external_id}`)) reason = 'duplicate external_id in this run';\n\n      if (reason) {\n        rejected.push({ item: { tool: vendor.tool, ...raw }, reason });\n        continue;\n      }\n      seen.add(`${vendor.tool}|${account.external_id}`);\n      account.email = email;        // lower-cased and trimmed; a \"+alias\" is kept on purpose (the audit needs it)\n      accounts.push(account);\n      vendors[vendor.tool].count += 1;\n    }\n  }\n}\n\nreturn [{ json: { accounts, rejected, vendors, items_in: itemsIn, items_out: accounts.length } }];\n"
+      },
+      "name": "Normalise accounts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1720,
+        330
+      ],
+      "id": "07850f3f-431a-4f62-97f8-0d2238f6de9d"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Upsert accounts\" node. $1 = JSON array from \"Normalise accounts\".\n-- The vendor key ('chatterly', ...) is matched to tools.name by its first word.\nWITH up AS (\n    INSERT INTO accounts (tool_id, external_id, email, seat_type, status, created_at, last_active_at)\n    SELECT t.id, a.external_id, a.email, a.seat_type, a.status, a.created_at, a.last_active_at\n    FROM jsonb_to_recordset($1::jsonb) AS a(\n        tool text, external_id text, email text, seat_type text, status text,\n        created_at timestamptz, last_active_at timestamptz)\n    JOIN tools t ON lower(split_part(t.name, ' ', 1)) = a.tool\n    ON CONFLICT (tool_id, external_id) DO UPDATE SET\n        email          = EXCLUDED.email,\n        seat_type      = EXCLUDED.seat_type,\n        status         = EXCLUDED.status,\n        created_at     = EXCLUDED.created_at,\n        last_active_at = EXCLUDED.last_active_at\n    RETURNING (xmax = 0) AS inserted\n)\nSELECT count(*) FILTER (WHERE inserted)     AS inserted,\n       count(*) FILTER (WHERE NOT inserted) AS updated\nFROM up;\n",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($('Normalise accounts').first().json.accounts)] }}"
+        }
+      },
+      "name": "Upsert accounts",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1940,
+        330
+      ],
+      "id": "ba60b97c-a8df-40d1-8a1e-2d839acc9ff7",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Rejected to dead_letter\" node. $1 = rejected array, $2 = Code node name (e.g. 'Normalise accounts').\n-- Same rejected item twice (while still open) is stored once, so re-runs do not pile up.\nINSERT INTO dead_letter (workflow, node, payload, error)\nSELECT 'A - Usage audit', $2, r.item, r.reason\nFROM jsonb_to_recordset($1::jsonb) AS r(item jsonb, reason text)\nWHERE NOT EXISTS (\n    SELECT 1 FROM dead_letter d\n    WHERE d.workflow = 'A - Usage audit' AND d.node = $2\n      AND d.payload = r.item AND d.status = 'open'\n);\n",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($json.rejected), 'Normalise accounts'] }}"
+        }
+      },
+      "name": "Rejected accounts",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1940,
+        480
+      ],
+      "id": "8f6b4631-936a-49f3-8aa1-316f1190876b",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Normalise usage\"  (mode: Run Once for All Items)\n// Reads the four vendor usage lists BY NODE NAME, so the HTTP nodes must be called exactly:\n//   \"Chatterly usage\", \"DesignHub usage\", \"CodeForge activity\", \"MeetSpace activity\"\n// Maps every vendor to:  { tool, external_id, day (YYYY-MM-DD), activity_count, spend_usd }\n// Output: one item per batch of up to 2000 rows { usage, rejected, items_in, items_out, batch, batches }.\n//   \"Upsert usage\" runs once per batch. rejected, items_in, items_out and bad_pages are the totals (same on every batch).\n\nconst BATCH_SIZE = 2000;\n\n// A real calendar day written as YYYY-MM-DD, or null.\nfunction checkDay(text) {\n  if (typeof text !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(text)) return null;\n  return Number.isNaN(Date.parse(text)) ? null : text;\n}\n// MeetSpace sends the start of the day as epoch seconds (UTC) -> \"YYYY-MM-DD\"\nfunction dayFromEpochSeconds(n) {\n  return typeof n === 'number' ? checkDay(new Date(n * 1000).toISOString().slice(0, 10)) : null;\n}\nconst round2 = (n) => Math.round(Number(n) * 100) / 100;\n\nconst VENDORS = [\n  {\n    tool: 'chatterly', node: 'Chatterly usage', list: (p) => p.data,\n    map: (r) => ({ external_id: r.user_id, day: checkDay(r.date), activity_count: r.requests, spend_usd: r.cost_usd }),\n  },\n  {\n    tool: 'designhub', node: 'DesignHub usage', list: (p) => p.items,\n    map: (r) => ({\n      external_id: r.id,\n      day: checkDay(String(r.day).replace(/^(\\d{4})(\\d{2})(\\d{2})$/, '$1-$2-$3')),   // 20260105 -> 2026-01-05\n      activity_count: r.actions, spend_usd: Number(r.spend_cents) / 100,             // cents -> dollars\n    }),\n  },\n  {\n    tool: 'codeforge', node: 'CodeForge activity', list: (p) => p.events,\n    map: (r) => ({ external_id: r.member_id, day: checkDay(r.date), activity_count: r.contributions, spend_usd: 0 }),\n  },\n  {\n    tool: 'meetspace', node: 'MeetSpace activity', list: (p) => p.results,\n    map: (r) => ({ external_id: r.uid, day: dayFromEpochSeconds(r.day_start), activity_count: r.meetings, spend_usd: 0 }),\n  },\n];\n\nfunction pagesOf(nodeName) {\n  try { return $(nodeName).all().map((i) => i.json); } catch (e) { return []; }\n}\n\nconst byKey = new Map();      // tool|external_id|day -> row (a repeated row replaces the earlier one)\nconst rejected = [];\nlet itemsIn = 0;\n\nlet badPages = 0;      // pages without the vendor's list (error bodies); they are skipped and counted\n\nfor (const vendor of VENDORS) {\n  for (const page of pagesOf(vendor.node)) {\n    if (!Array.isArray(vendor.list(page))) { badPages += 1; continue; }\n    for (const raw of vendor.list(page)) {\n      itemsIn += 1;\n      const row = { tool: vendor.tool, ...vendor.map(raw) };\n\n      let reason = null;\n      if (!row.external_id) reason = 'missing external_id';\n      else if (!row.day) reason = 'unparseable day';\n      else if (!Number.isInteger(row.activity_count) || row.activity_count < 0) reason = 'invalid activity_count';\n      else if (!Number.isFinite(row.spend_usd) || row.spend_usd < 0) reason = 'invalid spend';\n\n      if (reason) {\n        rejected.push({ item: { tool: vendor.tool, ...raw }, reason });\n        continue;\n      }\n      row.spend_usd = round2(row.spend_usd);\n      byKey.set(`${row.tool}|${row.external_id}|${row.day}`, row);\n    }\n  }\n}\n\nconst rows = [...byKey.values()];\nconst batches = Math.max(1, Math.ceil(rows.length / BATCH_SIZE));\nconst out = [];\nfor (let i = 0; i < batches; i += 1) {\n  out.push({\n    json: {\n      usage: rows.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE),\n      rejected, items_in: itemsIn, items_out: rows.length, bad_pages: badPages, batch: i + 1, batches,\n    },\n  });\n}\nreturn out;\n"
+      },
+      "name": "Normalise usage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        330
+      ],
+      "id": "6a73e24f-db23-4ffc-b9b5-f9b90e7dc887"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Upsert usage\" node. $1 = one batch (array) from \"Normalise usage\".\n-- Rows whose account is not in the accounts table are counted in \"unmatched\", not silently lost.\nWITH matched AS (\n    SELECT a.id AS account_id, u.day, u.activity_count, u.spend_usd\n    FROM jsonb_to_recordset($1::jsonb) AS u(\n        tool text, external_id text, day date, activity_count int, spend_usd numeric)\n    JOIN tools t    ON lower(split_part(t.name, ' ', 1)) = u.tool\n    JOIN accounts a ON a.tool_id = t.id AND a.external_id = u.external_id\n),\nup AS (\n    INSERT INTO usage_daily (account_id, day, activity_count, spend_usd)\n    SELECT account_id, day, activity_count, spend_usd FROM matched\n    ON CONFLICT (account_id, day) DO UPDATE SET\n        activity_count = EXCLUDED.activity_count,\n        spend_usd      = EXCLUDED.spend_usd\n    RETURNING 1\n)\nSELECT (SELECT count(*) FROM up) AS upserted,\n       jsonb_array_length($1::jsonb) - (SELECT count(*) FROM matched) AS unmatched;\n",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($json.usage)] }}"
+        }
+      },
+      "name": "Upsert usage",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2380,
+        330
+      ],
+      "id": "689359bc-cbdc-46fd-9076-a9480e54fc95",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Rejected to dead_letter\" node. $1 = rejected array, $2 = Code node name (e.g. 'Normalise accounts').\n-- Same rejected item twice (while still open) is stored once, so re-runs do not pile up.\nINSERT INTO dead_letter (workflow, node, payload, error)\nSELECT 'A - Usage audit', $2, r.item, r.reason\nFROM jsonb_to_recordset($1::jsonb) AS r(item jsonb, reason text)\nWHERE NOT EXISTS (\n    SELECT 1 FROM dead_letter d\n    WHERE d.workflow = 'A - Usage audit' AND d.node = $2\n      AND d.payload = r.item AND d.status = 'open'\n);\n",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($json.rejected), 'Normalise usage'] }}"
+        }
+      },
+      "name": "Rejected usage",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2380,
+        480
+      ],
+      "id": "d366a28a-c231-4624-932c-29e9f9d17944",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Audit rules\" node (Postgres, Execute Query). No parameters. Read-only: it only SELECTs.\n-- Returns one row per finding: finding_type, account_id, employee_email, severity, details.\n-- Thresholds come from app_config (see the cfg CTE).\n--\n-- Email matching (same rule as the data generator): lower-case, and drop any \"+tag\"\n-- so \"ana.nikolic+alias@x\" is matched to \"ana.nikolic@x\". That makes alias accounts\n-- duplicates, not orphans.\nWITH cfg AS (\n    SELECT\n        COALESCE((SELECT (value #>> '{}')::int     FROM app_config WHERE key = 'inactive_days'),             30) AS inactive_days,\n        COALESCE((SELECT (value #>> '{}')::int     FROM app_config WHERE key = 'new_account_grace_days'),    14) AS grace_days,\n        COALESCE((SELECT (value #>> '{}')::int     FROM app_config WHERE key = 'mismatch_window_days'),      30) AS window_days,\n        COALESCE((SELECT (value #>> '{}')::numeric FROM app_config WHERE key = 'mismatch_min_avg_activity'),  3) AS min_avg\n),\n\n-- Every account with its tool and the employee it belongs to (if any).\nacct AS (\n    SELECT a.id, a.tool_id, lower(split_part(t.name, ' ', 1)) AS tool_key, t.name AS tool_name,\n           t.unit_price_monthly AS price, a.external_id, a.email, a.seat_type,\n           a.created_at, a.last_active_at,\n           regexp_replace(lower(btrim(a.email)), '\\+[^@]*@', '@') AS canon_email,\n           e.status AS emp_status\n    FROM accounts a\n    JOIN tools t ON t.id = a.tool_id\n    LEFT JOIN employees e ON e.email = regexp_replace(lower(btrim(a.email)), '\\+[^@]*@', '@')\n),\n\n-- Orphaned: no matching employee, or the employee has left.\norphaned AS (\n    SELECT 'orphaned_account' AS finding_type, id AS account_id, email AS employee_email, 'high' AS severity,\n           jsonb_build_object(\n               'tool', tool_name, 'external_id', external_id, 'seat_type', seat_type,\n               'reason', CASE WHEN emp_status IS NULL THEN 'not_in_hr' ELSE 'terminated' END,\n               'last_active_at', last_active_at, 'monthly_cost', price) AS details\n    FROM acct\n    WHERE emp_status IS NULL OR emp_status = 'terminated'\n),\n\n-- Inactive: a current employee whose seat has not been used for inactive_days\n-- (or never used, and the account is older than the grace period).\ninactive AS (\n    SELECT 'inactive_seat', a.id, a.email, 'medium',\n           jsonb_build_object(\n               'tool', a.tool_name, 'external_id', a.external_id, 'seat_type', a.seat_type,\n               'last_active_at', a.last_active_at,\n               'days_inactive', CASE WHEN a.last_active_at IS NULL THEN NULL\n                                     ELSE (current_date - a.last_active_at::date) END,\n               'monthly_cost', a.price)\n    FROM acct a, cfg\n    WHERE a.emp_status = 'active'\n      AND ( a.last_active_at < now() - make_interval(days => cfg.inactive_days)\n            OR (a.last_active_at IS NULL AND a.created_at < now() - make_interval(days => cfg.grace_days)) )\n),\n\n-- Premium seat with a low daily average over the window. Days with no usage row count as zero.\n-- Only judged for tools that have usage data in the window (so a failed usage sync cannot\n-- flag every premium seat) and for current employees (leavers are already \"orphaned\").\nusage_window AS (\n    SELECT u.account_id,\n           sum(u.activity_count)::numeric / cfg.window_days   AS avg_daily,\n           count(*) FILTER (WHERE u.activity_count > 0)        AS active_days\n    FROM usage_daily u, cfg\n    WHERE u.day > current_date - cfg.window_days\n    GROUP BY u.account_id, cfg.window_days\n),\ntools_with_usage AS (\n    SELECT DISTINCT a.tool_id\n    FROM usage_daily u JOIN accounts a ON a.id = u.account_id, cfg\n    WHERE u.day > current_date - cfg.window_days\n),\nmismatch AS (\n    SELECT 'seat_mismatch', a.id, a.email, 'low',\n           jsonb_build_object(\n               'tool', a.tool_name, 'external_id', a.external_id, 'seat_type', a.seat_type,\n               'avg_daily_activity', round(COALESCE(w.avg_daily, 0), 2),\n               'active_days', COALESCE(w.active_days, 0),\n               'window_days', cfg.window_days, 'monthly_cost', 0)\n    FROM acct a\n    CROSS JOIN cfg\n    LEFT JOIN usage_window w ON w.account_id = a.id\n    WHERE a.seat_type = 'premium'\n      AND a.emp_status = 'active'\n      AND a.tool_id IN (SELECT tool_id FROM tools_with_usage)\n      AND COALESCE(w.avg_daily, 0) < cfg.min_avg\n),\n\n-- Duplicate: the same person has 2+ accounts in one tool. The account that uses the person's\n-- plain email is kept (then the oldest); each extra one, normally the \"+alias\", gets a finding\n-- (account_id = the extra account), so findings stay unique.\nranked AS (\n    SELECT acct.*,\n           row_number() OVER (PARTITION BY tool_id, canon_email ORDER BY (lower(btrim(email)) <> canon_email), created_at, id) AS rn,\n           first_value(external_id) OVER (PARTITION BY tool_id, canon_email ORDER BY (lower(btrim(email)) <> canon_email), created_at, id) AS kept_external_id\n    FROM acct\n    WHERE emp_status IS NOT NULL\n),\nduplicate AS (\n    SELECT 'duplicate_account', id, canon_email, 'medium',\n           jsonb_build_object(\n               'tool', tool_name, 'external_id', external_id, 'email', email,\n               'duplicate_of', kept_external_id, 'monthly_cost', price)\n    FROM ranked\n    WHERE rn > 1\n),\n\n-- Over-allocation: more accounts than seats in the contracts that are in force today.\n-- Not tied to one account, so employee_email carries \"tool:<name>\" to keep the key unique per tool.\nover_allocation AS (\n    SELECT 'over_allocation', NULL::int, 'tool:' || ac.tool_key, 'high',\n           jsonb_build_object(\n               'tool', ac.tool_name, 'accounts', ac.n_accounts, 'seats', COALESCE(s.seats, 0),\n               'excess', ac.n_accounts - COALESCE(s.seats, 0),\n               'monthly_cost', (ac.n_accounts - COALESCE(s.seats, 0)) * ac.price)\n    FROM (SELECT tool_id, tool_key, tool_name, price, count(*) AS n_accounts\n          FROM acct GROUP BY tool_id, tool_key, tool_name, price) ac\n    LEFT JOIN (SELECT tool_id, sum(seats) AS seats FROM contracts\n               WHERE current_date BETWEEN start_date AND end_date GROUP BY tool_id) s\n           ON s.tool_id = ac.tool_id\n    WHERE ac.n_accounts > COALESCE(s.seats, 0)\n)\n\nSELECT * FROM orphaned\nUNION ALL SELECT * FROM inactive\nUNION ALL SELECT * FROM mismatch\nUNION ALL SELECT * FROM duplicate\nUNION ALL SELECT * FROM over_allocation;\n",
+        "options": {}
+      },
+      "name": "Audit rules",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2600,
+        330
+      ],
+      "id": "8f9b4f65-0a49-4f1d-b7cd-7b0b5c6de6fb",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Shape findings\"  (mode: Run Once for All Items)\n// Input : the rows from the \"Audit rules\" Postgres node (one item per finding; turn on \"Always Output Data\").\n// Output: ONE item { findings, total, by_type } -> \"Upsert findings\" gets findings as JSON.\n// It drops empty rows, makes sure each finding is unique (the table has a unique key) and counts per type.\n\nconst ALLOWED = ['inactive_seat', 'orphaned_account', 'seat_mismatch', 'duplicate_account', 'over_allocation'];\nconst findings = [];\nconst byType = {};\nconst seen = new Set();\n\nfor (const item of $input.all()) {\n  const f = item.json;\n  if (!f.finding_type) continue;                            // the empty item from \"Always Output Data\"\n  if (!ALLOWED.includes(f.finding_type)) continue;\n\n  // Same key as the unique index in audit_findings: type + account (or 0) + email (or '')\n  const key = `${f.finding_type}|${f.account_id ?? 0}|${f.employee_email ?? ''}`;\n  if (seen.has(key)) continue;\n  seen.add(key);\n\n  findings.push({\n    finding_type: f.finding_type,\n    account_id: f.account_id ?? null,\n    employee_email: f.employee_email ?? null,\n    severity: f.severity,\n    details: f.details ?? {},\n  });\n  byType[f.finding_type] = (byType[f.finding_type] ?? 0) + 1;\n}\n\nreturn [{ json: { findings, total: findings.length, by_type: byType } }];\n"
+      },
+      "name": "Shape findings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2820,
+        330
+      ],
+      "id": "297fd66a-2abf-4fb9-b0a5-a94e2532eb9a"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Upsert findings\" node. $1 = findings array from \"Shape findings\".\n-- A finding seen again only gets last_seen/details refreshed. One that had been resolved and\n-- comes back is re-opened and will be notified again.\nWITH up AS (\n    INSERT INTO audit_findings (finding_type, account_id, employee_email, severity, details)\n    SELECT f.finding_type, f.account_id, f.employee_email, f.severity, f.details\n    FROM jsonb_to_recordset($1::jsonb) AS f(\n        finding_type text, account_id int, employee_email text, severity text, details jsonb)\n    ON CONFLICT (finding_type, COALESCE(account_id, 0), COALESCE(employee_email, '')) DO UPDATE SET\n        last_seen   = now(),\n        severity    = EXCLUDED.severity,\n        details     = EXCLUDED.details,\n        notified_at = CASE WHEN audit_findings.resolved_at IS NOT NULL THEN NULL\n                           ELSE audit_findings.notified_at END,\n        resolved_at = NULL\n    RETURNING (xmax = 0) AS inserted\n)\nSELECT count(*) FILTER (WHERE inserted)     AS new_findings,\n       count(*) FILTER (WHERE NOT inserted) AS seen_again\nFROM up;\n",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($json.findings)] }}"
+        }
+      },
+      "name": "Upsert findings",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3040,
+        330
+      ],
+      "id": "16b0e9f0-da6a-4759-ade2-9f0c8003698e",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Resolve findings\" node. $1 = run_started_at (from the \"Last sync\" node).\n-- Anything still open that this run did not touch is gone: mark it resolved (history is kept).\nUPDATE audit_findings\nSET resolved_at = now()\nWHERE resolved_at IS NULL\n  AND last_seen < $1::timestamptz\nRETURNING id;\n",
+        "options": {
+          "queryReplacement": "={{ [$('Last sync').first().json.run_started_at] }}"
+        }
+      },
+      "name": "Resolve findings",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3260,
+        330
+      ],
+      "id": "fca48e38-de97-43d4-abcf-036eae656444",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Select new findings\" node. No parameters. Turn on \"Always Output Data\" in the node settings,\n-- otherwise n8n stops here when there are no new findings and the digest never runs.\nSELECT f.id, f.finding_type, f.severity, f.employee_email, f.details,\n       (SELECT count(*) FROM accounts) AS accounts_checked\nFROM audit_findings f\nWHERE f.notified_at IS NULL\n  AND f.resolved_at IS NULL\nORDER BY f.finding_type, (f.details->>'monthly_cost')::numeric DESC NULLS LAST, f.id;\n",
+        "options": {}
+      },
+      "name": "Select new findings",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3480,
+        330
+      ],
+      "id": "a59833f4-7327-4f99-9424-3f45710dc319",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      },
+      "executeOnce": false,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Build digest\"  (mode: Run Once for All Items)\n// Input : the rows from \"Select new findings\" (Always Output Data on, so an empty result is one empty item).\n// Output: ONE item { skip, text, blocks, finding_ids }\n//   skip = true when there is nothing to post (no new findings and post_empty_digest is false)\n// Slack node: Message Type \"Blocks\", Blocks = {{ JSON.stringify({ blocks: $json.blocks }) }}, Text = {{ $json.text }}\n\nconst TOP_N = 5;\nconst TITLES = {\n  orphaned_account: ':ghost: Orphaned accounts',\n  inactive_seat: ':zzz: Inactive seats',\n  duplicate_account: ':busts_in_silhouette: Duplicate accounts',\n  seat_mismatch: ':arrows_counterclockwise: Premium seats barely used',\n  over_allocation: ':warning: More accounts than licensed seats',\n};\nconst ORDER = ['orphaned_account', 'over_allocation', 'inactive_seat', 'duplicate_account', 'seat_mismatch'];\n\nconst cfg = $('Config').first().json.cfg;\nconst findings = $input.all().map((i) => i.json).filter((f) => f.finding_type);\nconst accountsChecked = $('Normalise accounts').first().json.items_out;\nconst vendors = $('Normalise accounts').first().json.vendors;\nconst vendorNames = { chatterly: 'Chatterly AI', designhub: 'DesignHub', codeforge: 'CodeForge', meetspace: 'MeetSpace' };\n\nconst money = (n) => `$${Math.round(n).toLocaleString('en-US')}`;\nconst cost = (f) => Number(f.details?.monthly_cost ?? 0);\n\n// \"3/4 vendors synced, DesignHub failed\"\nconst failed = Object.entries(vendors).filter(([, v]) => !v.ok).map(([k]) => vendorNames[k]);\nconst syncLine = failed.length === 0\n  ? `${Object.keys(vendors).length}/${Object.keys(vendors).length} vendors synced`\n  : `${Object.keys(vendors).length - failed.length}/${Object.keys(vendors).length} vendors synced, ${failed.join(', ')} failed`;\n\n// Nothing new: post one short line, or nothing at all (setting post_empty_digest), unless a vendor failed\nif (findings.length === 0) {\n  const text = `No new findings, ${accountsChecked} accounts checked. ${syncLine}.`;\n  // A failed vendor is always worth a message, even with no new findings.\n  const skip = cfg.post_empty_digest !== true && failed.length === 0;\n  const blocks = [{ type: 'section', text: { type: 'mrkdwn', text: `${failed.length > 0 ? ':warning: ' : ''}${text}` } }];\n  return [{ json: { skip, text, blocks, finding_ids: [] } }];\n}\n\n// One line per finding\nfunction line(f) {\n  const d = f.details ?? {};\n  const who = f.employee_email ?? '';\n  switch (f.finding_type) {\n    case 'orphaned_account': return `\u2022 ${who} \u2014 ${d.tool}, ${d.reason === 'terminated' ? 'employee has left' : 'not in HR'}, ${money(cost(f))}/mo`;\n    case 'inactive_seat': return `\u2022 ${who} \u2014 ${d.tool}, last active ${String(d.last_active_at ?? 'never').slice(0, 10)}, ${money(cost(f))}/mo`;\n    case 'duplicate_account': return `\u2022 ${who} \u2014 ${d.tool}, extra account ${d.external_id}, ${money(cost(f))}/mo`;\n    case 'seat_mismatch': return `\u2022 ${who} \u2014 ${d.tool}, premium but ${d.active_days} active days in ${d.window_days}`;\n    case 'over_allocation': return `\u2022 ${d.tool} \u2014 ${d.accounts} accounts for ${d.seats} seats (${d.excess} over, ${money(cost(f))}/mo)`;\n    default: return `\u2022 ${who}`;\n  }\n}\n\nconst savings = findings.reduce((sum, f) => sum + cost(f), 0);\nconst blocks = [\n  { type: 'header', text: { type: 'plain_text', text: 'License audit: new findings' } },\n  {\n    type: 'section',\n    text: { type: 'mrkdwn', text: `*${findings.length} new findings*, about *${money(savings)}/month* at stake` },\n  },\n  { type: 'context', elements: [{ type: 'mrkdwn', text: `${accountsChecked} accounts checked \u00b7 ${syncLine}` }] },\n  { type: 'divider' },\n];\n\nfor (const type of ORDER) {\n  const group = findings.filter((f) => f.finding_type === type);\n  if (group.length === 0) continue;\n  group.sort((a, b) => cost(b) - cost(a));                 // biggest cost first\n  const groupCost = group.reduce((sum, f) => sum + cost(f), 0);\n  const shown = group.slice(0, TOP_N).map(line);\n  if (group.length > TOP_N) shown.push(`_\u2026and ${group.length - TOP_N} more_`);\n  blocks.push({\n    type: 'section',\n    text: { type: 'mrkdwn', text: `*${TITLES[type]}* (${group.length}${groupCost > 0 ? `, ${money(groupCost)}/mo` : ''})\\n${shown.join('\\n')}` },\n  });\n}\n\nreturn [{\n  json: {\n    skip: false,\n    text: `License audit: ${findings.length} new findings, about ${money(savings)}/month at stake`,\n    blocks,\n    finding_ids: findings.map((f) => f.id),\n  },\n}];\n"
+      },
+      "name": "Build digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3700,
+        330
+      ],
+      "id": "f516e66d-eaba-4d79-93fb-420d896faf79"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "skip-false",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Post digest?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3920,
+        330
+      ],
+      "id": "bc03b79f-fb5b-4f1c-b05e-3c174aa2059b"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Config').first().json.cfg.slack_channel_alerts }}"
+        },
+        "messageType": "block",
+        "blocksUi": "={{ JSON.stringify({ blocks: $('Build digest').first().json.blocks }) }}",
+        "text": "={{ $('Build digest').first().json.text }}",
+        "otherOptions": {}
+      },
+      "name": "Slack digest",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        4140,
+        280
+      ],
+      "id": "6310cd8e-7ccd-4d2b-823d-e0a882c26cc6",
+      "credentials": {
+        "slackApi": {
+          "id": "8hrTthMYaMAUFbva",
+          "name": "Slack account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Mark notified\" node, runs after the Slack post succeeds. $1 = finding_ids from \"Build digest\".\nUPDATE audit_findings\nSET notified_at = now()\nWHERE id = ANY (SELECT jsonb_array_elements_text($1::jsonb)::int)\n  AND notified_at IS NULL;\n",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($('Build digest').first().json.finding_ids)] }}"
+        }
+      },
+      "name": "Mark notified",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        4360,
+        280
+      ],
+      "id": "9aaf0a91-af9b-4001-8e87-735a9f175e48",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "cdgAF4motzMJqhNh",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "finish",
+            "workflow": "={{ $workflow.name }}",
+            "execution_id": "={{ String($execution.id) }}",
+            "items_in": "={{ $('Normalise accounts').first().json.items_in + $('Normalise usage').first().json.items_in }}",
+            "items_out": "={{ $('Normalise accounts').first().json.items_out + $('Normalise usage').first().json.items_out }}",
+            "status": "={{ Object.values($('Normalise accounts').first().json.vendors).every(v => v.ok) && !$('Insert dead_letter').isExecuted ? 'success' : 'partial' }}",
+            "notes": "={{ $('Build digest').first().json.text }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "name": "Run log finish",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        4580,
+        330
+      ],
+      "id": "78169956-0ce2-4e8d-9b26-4ce9b7d05a23"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ends the run as failed when a source could not be synced, so the error workflow alerts Slack.\nconst vendors = $('Normalise accounts').first().json.vendors;\nconst failed = Object.entries(vendors).filter(([, v]) => !v.ok).map(([k]) => k);\nconst fetchErrors = $('Insert dead_letter').isExecuted ? $('Insert dead_letter').all().length : 0;\nif (failed.length > 0 || fetchErrors > 0) {\n  const names = failed.length ? ', not synced: ' + failed.join(', ') : '';\n  throw new Error(`Usage audit incomplete: ${fetchErrors} fetch(es) failed${names} (see dead_letter)`);\n}\nreturn $input.all();\n"
+      },
+      "name": "Fail if vendors failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4800,
+        330
+      ],
+      "id": "7bf23161-1301-4165-96af-ae8a462f9952"
     }
   ],
   "connections": {
@@ -553,7 +1028,7 @@
       "main": [
         [
           {
-            "node": "Last sync",
+            "node": "Run log start",
             "type": "main",
             "index": 0
           }
@@ -613,7 +1088,13 @@
     },
     "HR employees": {
       "main": [
-        [],
+        [
+          {
+            "node": "Normalise employees",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Insert dead_letter",
@@ -625,7 +1106,13 @@
     },
     "Chatterly users": {
       "main": [
-        [],
+        [
+          {
+            "node": "Wait for all",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Insert dead_letter",
@@ -637,7 +1124,13 @@
     },
     "Chatterly usage": {
       "main": [
-        [],
+        [
+          {
+            "node": "Wait for all",
+            "type": "main",
+            "index": 1
+          }
+        ],
         [
           {
             "node": "Insert dead_letter",
@@ -649,7 +1142,13 @@
     },
     "DesignHub users": {
       "main": [
-        [],
+        [
+          {
+            "node": "Wait for all",
+            "type": "main",
+            "index": 2
+          }
+        ],
         [
           {
             "node": "Insert dead_letter",
@@ -661,7 +1160,13 @@
     },
     "DesignHub usage": {
       "main": [
-        [],
+        [
+          {
+            "node": "Wait for all",
+            "type": "main",
+            "index": 3
+          }
+        ],
         [
           {
             "node": "Insert dead_letter",
@@ -673,7 +1178,13 @@
     },
     "CodeForge members": {
       "main": [
-        [],
+        [
+          {
+            "node": "Wait for all",
+            "type": "main",
+            "index": 4
+          }
+        ],
         [
           {
             "node": "Insert dead_letter",
@@ -685,7 +1196,13 @@
     },
     "CodeForge activity": {
       "main": [
-        [],
+        [
+          {
+            "node": "Wait for all",
+            "type": "main",
+            "index": 5
+          }
+        ],
         [
           {
             "node": "Insert dead_letter",
@@ -697,7 +1214,13 @@
     },
     "MeetSpace members": {
       "main": [
-        [],
+        [
+          {
+            "node": "Wait for all",
+            "type": "main",
+            "index": 6
+          }
+        ],
         [
           {
             "node": "Insert dead_letter",
@@ -709,10 +1232,247 @@
     },
     "MeetSpace activity": {
       "main": [
-        [],
+        [
+          {
+            "node": "Wait for all",
+            "type": "main",
+            "index": 7
+          }
+        ],
         [
           {
             "node": "Insert dead_letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run log start": {
+      "main": [
+        [
+          {
+            "node": "Last sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise employees": {
+      "main": [
+        [
+          {
+            "node": "Upsert employees",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Rejected employees",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert employees": {
+      "main": [
+        [
+          {
+            "node": "Wait for all",
+            "type": "main",
+            "index": 8
+          }
+        ]
+      ]
+    },
+    "Insert dead_letter": {
+      "main": [
+        [
+          {
+            "node": "Wait for all",
+            "type": "main",
+            "index": 9
+          }
+        ]
+      ]
+    },
+    "Wait for all": {
+      "main": [
+        [
+          {
+            "node": "Normalise accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise accounts": {
+      "main": [
+        [
+          {
+            "node": "Upsert accounts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Rejected accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert accounts": {
+      "main": [
+        [
+          {
+            "node": "Normalise usage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise usage": {
+      "main": [
+        [
+          {
+            "node": "Upsert usage",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Rejected usage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert usage": {
+      "main": [
+        [
+          {
+            "node": "Audit rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit rules": {
+      "main": [
+        [
+          {
+            "node": "Shape findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape findings": {
+      "main": [
+        [
+          {
+            "node": "Upsert findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert findings": {
+      "main": [
+        [
+          {
+            "node": "Resolve findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve findings": {
+      "main": [
+        [
+          {
+            "node": "Select new findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select new findings": {
+      "main": [
+        [
+          {
+            "node": "Build digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build digest": {
+      "main": [
+        [
+          {
+            "node": "Post digest?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post digest?": {
+      "main": [
+        [
+          {
+            "node": "Slack digest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run log finish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run log finish": {
+      "main": [
+        [
+          {
+            "node": "Fail if vendors failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack digest": {
+      "main": [
+        [
+          {
+            "node": "Mark notified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark notified": {
+      "main": [
+        [
+          {
+            "node": "Run log finish",
             "type": "main",
             "index": 0
           }

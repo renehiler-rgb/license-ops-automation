@@ -18,14 +18,14 @@ Schedule, daily at 06:30 (Europe/Belgrade). It can also be run by hand from the 
 
 ## What it does
 1. Load config, start a `workflow_runs` row (shared run log).
-2. Fetch HR and all vendor endpoints in parallel. Each fetch retries 4 times, 2000 ms apart.
+2. Fetch HR and all vendor endpoints in parallel. Each fetch retries 4 times, 2000 ms apart. The `Wait for all` merge node joins them (and the failed-fetch branch).
 3. Normalise to one schema (Code nodes). Items with no `external_id` or an unparseable date go to
    `dead_letter` as rejected, not silently dropped.
 4. Upsert `employees`, `accounts`, `usage_daily` (all `ON CONFLICT`).
 5. Run the audit rules in SQL, shape the findings, upsert `audit_findings`, and resolve findings
    that were not seen in this run.
 6. Build one Slack digest of findings that are new (`notified_at is null`), post it, mark them notified.
-7. Finish the run log row.
+7. Finish the run log row (`success`, or `partial` when any fetch failed), then fail the execution if a source was not synced so the error workflow raises the alert.
 
 ## Audit rules
 | Finding | Rule | Severity |
@@ -45,9 +45,10 @@ Schedule, daily at 06:30 (Europe/Belgrade). It can also be run by hand from the 
 | What goes wrong | What happens |
 |---|---|
 | Vendor returns 429/500 (chaos) | Retry On Fail, 4 tries. A retry restarts that whole fetch. |
-| One vendor stays down | The fetch goes to its error output and into `dead_letter`; the other vendors continue. |
+| One vendor stays down | The fetch goes to its error output and into `dead_letter`; the other vendors continue. The digest names the failed vendors (it is posted even when there are no new findings), the run log row is `partial`, and the last node fails the execution so the error workflow alerts Slack. |
+| Everything is down | Failed fetches still reach the merge node, so the pipeline completes: digest, `partial` run log, failure alert. |
 | Bad item (no id, bad date) | Rejected and stored in `dead_letter`. |
-| Any uncaught failure | The shared error workflow (`E - Error handler`) posts to Slack and writes `dead_letter`. |
+| Any uncaught failure | The shared error workflow (`E - Error handler`) posts to Slack and writes `dead_letter`. n8n only runs it for scheduled/webhook runs, not for runs started from the editor's CLI. |
 | Re-run | Upserts and the unique finding key mean no duplicates; `last_seen` is refreshed. |
 
 ## How to test

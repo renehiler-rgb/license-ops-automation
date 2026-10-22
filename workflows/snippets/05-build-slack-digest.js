@@ -29,10 +29,13 @@ const syncLine = failed.length === 0
   ? `${Object.keys(vendors).length}/${Object.keys(vendors).length} vendors synced`
   : `${Object.keys(vendors).length - failed.length}/${Object.keys(vendors).length} vendors synced, ${failed.join(', ')} failed`;
 
-// Nothing new: post one short line, or nothing at all (setting post_empty_digest)
+// Nothing new: post one short line, or nothing at all (setting post_empty_digest), unless a vendor failed
 if (findings.length === 0) {
   const text = `No new findings, ${accountsChecked} accounts checked. ${syncLine}.`;
-  return [{ json: { skip: cfg.post_empty_digest !== true, text, blocks: [], finding_ids: [] } }];
+  // A failed vendor is always worth a message, even with no new findings.
+  const skip = cfg.post_empty_digest !== true && failed.length === 0;
+  const blocks = [{ type: 'section', text: { type: 'mrkdwn', text: `${failed.length > 0 ? ':warning: ' : ''}${text}` } }];
+  return [{ json: { skip, text, blocks, finding_ids: [] } }];
 }
 
 // One line per finding
