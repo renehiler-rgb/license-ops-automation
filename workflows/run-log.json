@@ -71,7 +71,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH ins AS (\n  INSERT INTO workflow_runs (workflow, execution_id, items_in, notes)\n  SELECT $1, $2, $3::int, $4\n  WHERE NOT EXISTS (SELECT 1 FROM workflow_runs WHERE workflow = $1 AND execution_id = $2)\n  RETURNING id\n)\nSELECT id FROM ins\nUNION ALL\nSELECT id FROM workflow_runs WHERE workflow = $1 AND execution_id = $2\nLIMIT 1;",
+        "query": "-- A run that crashed or was stopped never reached its \"finish\" step. Any run of this workflow that is still open\n-- after an hour is closed as failed (stale), so the health report and the run history stay truthful.\nWITH stale AS (\n  UPDATE workflow_runs SET status = 'failed', finished_at = now(),\n         notes = left(COALESCE(notes || ' | ', '') || 'never finished (crashed or stopped)', 400)\n  WHERE workflow = $1 AND finished_at IS NULL AND started_at < now() - interval '1 hour' AND execution_id <> $2\n  RETURNING 1\n),\nins AS (\n  INSERT INTO workflow_runs (workflow, execution_id, items_in, notes)\n  SELECT $1, $2, $3::int, $4\n  WHERE NOT EXISTS (SELECT 1 FROM workflow_runs WHERE workflow = $1 AND execution_id = $2)\n  RETURNING id\n)\nSELECT id FROM ins\nUNION ALL\nSELECT id FROM workflow_runs WHERE workflow = $1 AND execution_id = $2\nLIMIT 1;",
         "options": {
           "queryReplacement": "={{ [$json.workflow, $json.execution_id, $json.items_in ?? null, $json.notes ?? null] }}"
         }

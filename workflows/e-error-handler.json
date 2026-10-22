@@ -91,6 +91,30 @@
           "name": "Slack account"
         }
       }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Closes the run-log row of the execution that failed (it never reached its own \"finish\" step).\n-- Parameters in order: workflow name, execution id, error text. No row is touched when the workflow has no run-log row.\nUPDATE workflow_runs\nSET status = 'failed',\n    finished_at = now(),\n    notes = left(COALESCE(notes || ' | ', '') || 'failed: ' || $3, 400)\nWHERE workflow = $1 AND execution_id = $2 AND finished_at IS NULL;",
+        "options": {
+          "queryReplacement": "={{ [$json.workflow, $json.payload.execution_id, $json.error] }}"
+        }
+      },
+      "name": "Close run log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        880,
+        260
+      ],
+      "id": "6f0a8d2e-2b0c-4c1e-9d55-0e7a3f6a9c11",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      },
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -126,6 +150,11 @@
           },
           {
             "node": "Insert dead_letter",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Close run log",
             "type": "main",
             "index": 0
           }
