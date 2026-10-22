@@ -3,9 +3,11 @@ services:
     image: docker.n8n.io/n8nio/n8n:2.43.8
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${N8N_PORT:-5678}:5678"
-    env_file: .env
+      - "127.0.0.1:${HOST_N8N_PORT:-5678}:5678"
+    # Only what n8n needs. (An env_file would hand every secret in .env, such as the Slack token, to this container,
+    # and a variable like N8N_PORT would even change n8n's own settings.)
     environment:
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       - GENERIC_TIMEZONE=Europe/Belgrade
       - TZ=Europe/Belgrade
     extra_hosts:
@@ -26,7 +28,7 @@ services:
       POSTGRES_USER: licenseops
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${HOST_POSTGRES_PORT:-5432}:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
@@ -40,7 +42,7 @@ services:
     build: ./mock-vendors
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${MOCK_PORT:-8000}:8000"
+      - "127.0.0.1:${HOST_MOCK_PORT:-8000}:8000"
     volumes:
       - ./data:/data:ro
     environment:

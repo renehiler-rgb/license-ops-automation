@@ -24,9 +24,9 @@ command -v python3 >/dev/null || fail "python3 is not installed"
 
 step "1/8 Environment (.env)"
 python3 scripts/prepare_env.py
-N8N_PORT=$(env_value N8N_PORT); N8N_PORT=${N8N_PORT:-5678}
-POSTGRES_PORT=$(env_value POSTGRES_PORT); POSTGRES_PORT=${POSTGRES_PORT:-5432}
-MOCK_PORT=$(env_value MOCK_PORT); MOCK_PORT=${MOCK_PORT:-8000}
+N8N_PORT=$(env_value HOST_N8N_PORT); N8N_PORT=${N8N_PORT:-5678}
+POSTGRES_PORT=$(env_value HOST_POSTGRES_PORT); POSTGRES_PORT=${POSTGRES_PORT:-5432}
+MOCK_PORT=$(env_value HOST_MOCK_PORT); MOCK_PORT=${MOCK_PORT:-8000}
 
 step "2/8 Synthetic data"
 if [ -f data/employees.json ]; then echo "data/ already generated"; else python3 scripts/generate_data.py; fi
