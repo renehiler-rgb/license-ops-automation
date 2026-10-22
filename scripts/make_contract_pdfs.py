@@ -2,9 +2,9 @@
 make_contract_pdfs.py - turn data/contracts.json into realistic contract PDFs.
 
 Run it from the project root (reportlab is in scripts/requirements.txt):
-  .venv/bin/python scripts/make_contract_pdfs.py
+  .venv/bin/python scripts/make_contract_pdfs.py [output_folder]
 
-It writes 7 files into sample-contracts/:
+It writes 7 files into sample-contracts/ (or the folder you give):
   - 6 contracts, one per entry in data/contracts.json, in three different layouts and wordings
     so the extraction in workflow C is not trivial (dates written in words, "ninety (90) days",
     the price only inside a table, and so on)
@@ -24,9 +24,13 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+import sys
+
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
-OUT = ROOT / "sample-contracts"
+# Output folder: the first argument, or sample-contracts/ (the committed examples). scripts/bootstrap.sh writes to
+# data/sample-contracts/ instead, because the dates in the PDFs must match the data of THIS installation.
+OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "sample-contracts"
 
 BUYER = "Northwind Media d.o.o."
 BUYER_ADDRESS = "Bulevar Oslobodjenja 10, 21000 Novi Sad, Serbia"
@@ -246,7 +250,7 @@ def make_invoice(path: Path, tool: dict) -> None:
 def main() -> None:
     contracts = json.loads((DATA / "contracts.json").read_text(encoding="utf-8"))
     tools = {t["slug"]: t for t in json.loads((DATA / "tools.json").read_text(encoding="utf-8"))}
-    OUT.mkdir(exist_ok=True)
+    OUT.mkdir(parents=True, exist_ok=True)
 
     for contract in contracts:
         tool = tools[contract["tool"]]

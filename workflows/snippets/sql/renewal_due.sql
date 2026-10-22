@@ -32,6 +32,9 @@ FROM picked p
 JOIN contracts c ON c.id = p.contract_id
 JOIN tools t ON t.id = c.tool_id
 WHERE p.threshold_days IS NOT NULL
+  -- Already handled: confirmed as sent, or claimed less than an hour ago by a run that may still be working.
+  -- A claim that stays unconfirmed for over an hour (a run that crashed after claiming) is picked up again.
   AND NOT EXISTS (SELECT 1 FROM renewal_alerts r
-                  WHERE r.contract_id = p.contract_id AND r.threshold_days = p.threshold_days)
+                  WHERE r.contract_id = p.contract_id AND r.threshold_days = p.threshold_days
+                    AND (r.confirmed_at IS NOT NULL OR r.sent_at > now() - interval '1 hour'))
 ORDER BY p.days_left, c.contract_ref;

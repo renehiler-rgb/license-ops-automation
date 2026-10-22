@@ -45,6 +45,9 @@ step "4/8 Loading tools, employees, contracts and budgets into Postgres"
 [ -d .venv ] || python3 -m venv .venv
 .venv/bin/pip install -q -r scripts/requirements.txt
 PGPORT="$POSTGRES_PORT" .venv/bin/python scripts/load_data.py
+# The contract dates depend on the day the data was generated, so the sample PDFs are made from THIS data.
+.venv/bin/python scripts/make_contract_pdfs.py data/sample-contracts >/dev/null
+echo "sample contracts: data/sample-contracts/ (7 PDFs that match your data)"
 
 step "5/8 n8n owner account"
 NEEDS_OWNER=$(curl -fs "http://localhost:${N8N_PORT}/rest/settings" \
@@ -101,4 +104,6 @@ Done.
   n8n:           http://localhost:${N8N_PORT}   (login: $(env_value N8N_OWNER_EMAIL), password in .env as N8N_OWNER_PASSWORD)
   mock vendors:  http://localhost:${MOCK_PORT}/health
 Next: open n8n and run "A - Usage audit" with the "Run manually" trigger, then see README.md for B, D and C.
+The mock vendors fail 5% of calls on purpose. If the first run of A reports a failed fetch, run it once more.
+Try the contracts:  scripts/post_contract.sh data/sample-contracts/*.pdf
 DONE

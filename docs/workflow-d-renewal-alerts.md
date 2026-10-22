@@ -14,6 +14,7 @@ Schedule, daily 07:30 (Europe/Belgrade). Can also be run by hand from the editor
    Contracts that already ended are ignored.
 3. **Claim the alert** by inserting `(contract_id, threshold_days)` into `renewal_alerts` *before* sending anything.
    The primary key lets only one run succeed, so a second or overlapping run cannot send the same alert twice.
+   The row is only *confirmed* (`confirmed_at`) after the Slack post worked. A claim that stays unconfirmed for more than an hour (the run crashed after claiming) is picked up again by the next run.
 4. **Jira (optional)**, only when `jira_enabled` is `true`: search for an open issue labelled with the contract ref; reuse it if found.
    Create a ticket only if none exists and only at the first (90-day) alert.
 5. **Slack alert** to `slack_channel_renewals` (Block Kit: tool, deadline, seats, annual value, owner, ticket).
@@ -30,6 +31,7 @@ the run is `partial` and the last node fails the execution so the error workflow
 | Nothing is due | The run log says "nothing due"; no Slack post. |
 | Run twice, or two runs overlap | The second one finds nothing to claim and stops. No duplicate. |
 | Slack fails | Claim released, `dead_letter` row, run `partial`, error alert. Retried next run. |
+| The run dies after claiming (crash, Slack credential missing) | The claim is never confirmed; after an hour the next run takes it over and sends the alert. A claim younger than an hour is left alone, so a run that is still working is not duplicated. |
 | Jira search fails | No ticket is created (a duplicate is worse than a missing ticket); the Slack alert says so. |
 | Jira create fails | The Slack alert is still sent and mentions the missing ticket. |
 | Jira ticket exists but the `renewal_alerts` row is lost | The label search finds the open ticket, no second one is created. |

@@ -5,12 +5,13 @@ Views: `db/init/06-finance-views.sql`. Number check: `scripts/check_spend.py`.
 
 ## Trigger
 - **Schedule:** 1st of the month, 08:30 (Europe/Belgrade). Reports the previous month.
-- **Webhook:** `POST /webhook/spend-report` with `{"month": "2026-09"}`. Regenerates any past or current month.
+- **Webhook:** `POST /webhook/spend-report` (header `X-Intake-Key`, the same key as the other webhooks) with `{"month": "2026-09"}`. Regenerates any past or current month.
   An empty body means the previous month. A bad or future month returns HTTP 400.
 - **Manual:** run from the editor (previous month).
 
 ```
-curl -X POST localhost:5678/webhook/spend-report -H 'Content-Type: application/json' -d '{"month":"2026-09"}'
+curl -X POST localhost:5678/webhook/spend-report -H 'X-Intake-Key: <INTAKE_API_KEY from .env>' \
+  -H 'Content-Type: application/json' -d '{"month":"2026-09"}'
 ```
 
 ## What it does

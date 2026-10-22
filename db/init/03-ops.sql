@@ -78,10 +78,13 @@ CREATE TABLE IF NOT EXISTS dead_letter (
 CREATE TABLE IF NOT EXISTS renewal_alerts (
     contract_id     integer NOT NULL REFERENCES contracts (id),
     threshold_days  integer NOT NULL,
-    sent_at         timestamptz NOT NULL DEFAULT now(),
+    sent_at         timestamptz NOT NULL DEFAULT now(),   -- when the alert was claimed, then when it was sent
     jira_key        text,
+    confirmed_at    timestamptz,                          -- set only after the Slack post worked
     PRIMARY KEY (contract_id, threshold_days)
 );
+-- For databases created before confirmed_at existed (the rows that are there were all sent):
+ALTER TABLE renewal_alerts ADD COLUMN IF NOT EXISTS confirmed_at timestamptz;
 
 CREATE TABLE IF NOT EXISTS monthly_reports (
     month       date PRIMARY KEY,                -- first day of the month

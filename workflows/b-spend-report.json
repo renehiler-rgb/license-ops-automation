@@ -37,7 +37,8 @@
         "httpMethod": "POST",
         "path": "spend-report",
         "responseMode": "responseNode",
-        "options": {}
+        "options": {},
+        "authentication": "headerAuth"
       },
       "name": "Webhook spend-report",
       "type": "n8n-nodes-base.webhook",
@@ -47,7 +48,13 @@
         320
       ],
       "id": "24db4ac8-68f8-4b3a-8702-9e1a4d3d584e",
-      "webhookId": "27395f68-1760-48d7-b5c6-f5b61ec6d2fc"
+      "webhookId": "27395f68-1760-48d7-b5c6-f5b61ec6d2fc",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nsb9huAfp5Ah596o",
+          "name": "Intake webhook key"
+        }
+      }
     },
     {
       "parameters": {

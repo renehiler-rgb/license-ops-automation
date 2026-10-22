@@ -10,7 +10,7 @@
         0,
         0
       ],
-      "id": "5f10d282-a358-4aae-9a18-a86e4bd3b2bc"
+      "id": "89357b0e-e3cd-40ed-977c-008a274ce5f8"
     },
     {
       "parameters": {
@@ -30,7 +30,7 @@
         0,
         160
       ],
-      "id": "7aa55001-3e99-41cb-b77e-33d48940266c"
+      "id": "d5a04a5c-f9d4-4fca-887b-7748aa35b550"
     },
     {
       "parameters": {
@@ -45,7 +45,7 @@
         240,
         80
       ],
-      "id": "233c6845-0e90-4c98-8a43-af668e14f0a8",
+      "id": "585ac384-4cd4-4d00-a30d-db860c009edb",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -81,12 +81,12 @@
         460,
         80
       ],
-      "id": "9d423816-23f7-44d8-b891-d15192ad48b3"
+      "id": "6043c261-b040-4ac8-8979-60390328480a"
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- \"Find due contracts\" node of workflow D (Postgres, Execute Query). No parameters.\n-- Turn on \"Always Output Data\" so the workflow still finishes when nothing is due.\n--\n-- A contract is due when its notice deadline (end date minus notice days) is at most N days away,\n-- for a threshold N in app_config.renewal_thresholds (default 90, 60, 30), and that threshold has\n-- not been alerted yet. \"At most\" (not \"exactly\") means a missed day, for example the machine\n-- being off, still gets its alert on the next run instead of never.\n-- A contract gets ONE alert per run: the tightest threshold it fits (89 days left -> 90, 59 -> 60).\n-- Contracts that already ended are ignored. A deadline already passed shows days_left < 0.\nWITH today AS (\n    SELECT (now() AT TIME ZONE 'Europe/Belgrade')::date AS day\n),\nthresholds AS (\n    SELECT t::int AS threshold_days\n    FROM jsonb_array_elements_text(\n             COALESCE((SELECT value FROM app_config WHERE key = 'renewal_thresholds'), '[90, 60, 30]'::jsonb)\n         ) AS t\n),\ncontract_days AS (\n    SELECT c.id AS contract_id,\n           (c.end_date - c.notice_days) - today.day AS days_left\n    FROM contracts c, today\n    WHERE c.end_date >= today.day\n),\npicked AS (\n    SELECT cd.contract_id, cd.days_left,\n           (SELECT min(threshold_days) FROM thresholds WHERE threshold_days >= cd.days_left) AS threshold_days\n    FROM contract_days cd\n)\nSELECT p.contract_id, p.threshold_days, p.days_left, c.contract_ref, t.name AS tool\nFROM picked p\nJOIN contracts c ON c.id = p.contract_id\nJOIN tools t ON t.id = c.tool_id\nWHERE p.threshold_days IS NOT NULL\n  AND NOT EXISTS (SELECT 1 FROM renewal_alerts r\n                  WHERE r.contract_id = p.contract_id AND r.threshold_days = p.threshold_days)\nORDER BY p.days_left, c.contract_ref;\n",
+        "query": "-- \"Find due contracts\" node of workflow D (Postgres, Execute Query). No parameters.\n-- Turn on \"Always Output Data\" so the workflow still finishes when nothing is due.\n--\n-- A contract is due when its notice deadline (end date minus notice days) is at most N days away,\n-- for a threshold N in app_config.renewal_thresholds (default 90, 60, 30), and that threshold has\n-- not been alerted yet. \"At most\" (not \"exactly\") means a missed day, for example the machine\n-- being off, still gets its alert on the next run instead of never.\n-- A contract gets ONE alert per run: the tightest threshold it fits (89 days left -> 90, 59 -> 60).\n-- Contracts that already ended are ignored. A deadline already passed shows days_left < 0.\nWITH today AS (\n    SELECT (now() AT TIME ZONE 'Europe/Belgrade')::date AS day\n),\nthresholds AS (\n    SELECT t::int AS threshold_days\n    FROM jsonb_array_elements_text(\n             COALESCE((SELECT value FROM app_config WHERE key = 'renewal_thresholds'), '[90, 60, 30]'::jsonb)\n         ) AS t\n),\ncontract_days AS (\n    SELECT c.id AS contract_id,\n           (c.end_date - c.notice_days) - today.day AS days_left\n    FROM contracts c, today\n    WHERE c.end_date >= today.day\n),\npicked AS (\n    SELECT cd.contract_id, cd.days_left,\n           (SELECT min(threshold_days) FROM thresholds WHERE threshold_days >= cd.days_left) AS threshold_days\n    FROM contract_days cd\n)\nSELECT p.contract_id, p.threshold_days, p.days_left, c.contract_ref, t.name AS tool\nFROM picked p\nJOIN contracts c ON c.id = p.contract_id\nJOIN tools t ON t.id = c.tool_id\nWHERE p.threshold_days IS NOT NULL\n  -- Already handled: confirmed as sent, or claimed less than an hour ago by a run that may still be working.\n  -- A claim that stays unconfirmed for over an hour (a run that crashed after claiming) is picked up again.\n  AND NOT EXISTS (SELECT 1 FROM renewal_alerts r\n                  WHERE r.contract_id = p.contract_id AND r.threshold_days = p.threshold_days\n                    AND (r.confirmed_at IS NOT NULL OR r.sent_at > now() - interval '1 hour'))\nORDER BY p.days_left, c.contract_ref;\n",
         "options": {}
       },
       "name": "Find due contracts",
@@ -96,7 +96,7 @@
         680,
         80
       ],
-      "id": "852bfea3-3395-42e2-9438-237ab4645431",
+      "id": "6ad2f22f-57eb-49e6-9e57-9da2dd4a8f6c",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -135,12 +135,12 @@
         900,
         80
       ],
-      "id": "9bd7ff37-b4de-435b-b4ae-0daa1c8658b1"
+      "id": "48916c2f-8ac7-4498-bf97-2b04dd087cfd"
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- \"Claim alert\" node of workflow D. Parameters in order: contract_id, threshold_days.\n-- The alert is claimed BEFORE it is sent. The primary key (contract_id, threshold_days) lets only one run\n-- insert the row; a second run (or an overlapping one) gets no row back and stops here, so a duplicate\n-- alert is impossible. If sending fails the claim is released again (see release_claim.sql).\n-- Returns the contract details used for the message and the Jira ticket.\nWITH claimed AS (\n    INSERT INTO renewal_alerts (contract_id, threshold_days)\n    VALUES ($1::int, $2::int)\n    ON CONFLICT (contract_id, threshold_days) DO NOTHING\n    RETURNING contract_id, threshold_days\n)\nSELECT cl.contract_id, cl.threshold_days,\n       c.contract_ref, t.name AS tool, t.vendor, c.seats, c.price_per_seat, c.billing_cycle,\n       round(c.seats * c.price_per_seat * 12, 2) AS annual_value,\n       c.start_date, c.end_date, c.notice_days, c.auto_renew, c.owner_email,\n       (c.end_date - c.notice_days) AS notice_deadline,\n       (c.end_date - c.notice_days) - (now() AT TIME ZONE 'Europe/Belgrade')::date AS days_left\nFROM claimed cl\nJOIN contracts c ON c.id = cl.contract_id\nJOIN tools t ON t.id = c.tool_id;\n",
+        "query": "-- \"Claim alert\" node of workflow D. Parameters in order: contract_id, threshold_days.\n-- The alert is claimed BEFORE it is sent. The primary key (contract_id, threshold_days) lets only one run\n-- insert the row; a second run (or an overlapping one) gets no row back and stops here, so a duplicate\n-- alert is impossible. If sending fails the claim is released again (see release_claim.sql); if the run dies\n-- before that, confirmed_at stays empty and the claim expires after an hour.\n-- Returns the contract details used for the message and the Jira ticket.\nWITH claimed AS (\n    INSERT INTO renewal_alerts (contract_id, threshold_days)\n    VALUES ($1::int, $2::int)\n    -- A claim that was never confirmed and is over an hour old belongs to a run that crashed: take it over.\n    ON CONFLICT (contract_id, threshold_days) DO UPDATE SET sent_at = now()\n        WHERE renewal_alerts.confirmed_at IS NULL AND renewal_alerts.sent_at < now() - interval '1 hour'\n    RETURNING contract_id, threshold_days\n)\nSELECT cl.contract_id, cl.threshold_days,\n       c.contract_ref, t.name AS tool, t.vendor, c.seats, c.price_per_seat, c.billing_cycle,\n       round(c.seats * c.price_per_seat * 12, 2) AS annual_value,\n       c.start_date, c.end_date, c.notice_days, c.auto_renew, c.owner_email,\n       (c.end_date - c.notice_days) AS notice_deadline,\n       (c.end_date - c.notice_days) - (now() AT TIME ZONE 'Europe/Belgrade')::date AS days_left\nFROM claimed cl\nJOIN contracts c ON c.id = cl.contract_id\nJOIN tools t ON t.id = c.tool_id;\n",
         "options": {
           "queryReplacement": "={{ [$json.contract_id, $json.threshold_days] }}"
         }
@@ -152,7 +152,7 @@
         1120,
         0
       ],
-      "id": "5abc59b7-37c5-4865-a107-0ce5a9f5be99",
+      "id": "2dde1902-c4f4-4392-adee-f2afbfbf1bab",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -191,7 +191,7 @@
         1340,
         0
       ],
-      "id": "caf358aa-8ece-4672-a185-deb3bd32cd9b"
+      "id": "3daeb68b-874d-4253-8ee5-d6dfaebdbdde"
     },
     {
       "parameters": {
@@ -223,7 +223,7 @@
         1560,
         -80
       ],
-      "id": "8e9a4b71-1c6d-4600-a0f8-0438874b60b9"
+      "id": "d2c3b79e-8760-423b-b174-a3de17583dec"
     },
     {
       "parameters": {
@@ -256,7 +256,7 @@
         1780,
         -160
       ],
-      "id": "87431eec-31ef-4c22-88c0-ce004924abd2",
+      "id": "dc396041-955f-48f7-883a-19e51e13e245",
       "credentials": {
         "jiraSoftwareCloudApi": {
           "id": "r3ocR5qWUYrvKBx0",
@@ -280,7 +280,7 @@
         2000,
         -160
       ],
-      "id": "597e202b-9a6b-4094-87b7-d5deeb9cad1e"
+      "id": "e9ed33a0-aee1-49ff-a7e9-662e0069654e"
     },
     {
       "parameters": {
@@ -312,7 +312,7 @@
         2220,
         -160
       ],
-      "id": "bfdd0345-2da7-4801-8369-e45f69cf87ab"
+      "id": "7e207b4d-e893-4d97-9d5e-c3f241cd4116"
     },
     {
       "parameters": {
@@ -332,7 +332,7 @@
         2440,
         -240
       ],
-      "id": "83d92414-a542-43cc-b569-ab3d5fa4a27b",
+      "id": "c820a637-fc89-415f-9dd6-4c4bc0bcf56b",
       "credentials": {
         "jiraSoftwareCloudApi": {
           "id": "r3ocR5qWUYrvKBx0",
@@ -353,7 +353,7 @@
         2680,
         0
       ],
-      "id": "25b78148-45e6-4ef7-8123-5cbd51989e26"
+      "id": "c8eca18a-ef5a-499c-8a52-b01ba3dcf9c6"
     },
     {
       "parameters": {
@@ -375,7 +375,7 @@
         2900,
         0
       ],
-      "id": "5c8e820c-2598-42a3-9172-51d707b2d4d3",
+      "id": "d70ddc42-d0d1-4127-9aa6-ac241174cb67",
       "credentials": {
         "slackApi": {
           "id": "8hrTthMYaMAUFbva",
@@ -390,7 +390,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- \"Record alert\" node of workflow D, runs after the Slack post worked.\n-- Parameters in order: contract_id, threshold_days, jira_key (empty when there is no ticket).\nUPDATE renewal_alerts\nSET jira_key = COALESCE(NULLIF($3, ''), jira_key),\n    sent_at  = now()\nWHERE contract_id = $1::int AND threshold_days = $2::int\nRETURNING contract_id, threshold_days, jira_key;\n",
+        "query": "-- \"Record alert\" node of workflow D, runs after the Slack post worked.\n-- Parameters in order: contract_id, threshold_days, jira_key (empty when there is no ticket).\nUPDATE renewal_alerts\nSET jira_key     = COALESCE(NULLIF($3, ''), jira_key),\n    sent_at      = now(),\n    confirmed_at = now()\nWHERE contract_id = $1::int AND threshold_days = $2::int\nRETURNING contract_id, threshold_days, jira_key;\n",
         "options": {
           "queryReplacement": "={{ [$('Build alert').item.json.contract_id, $('Build alert').item.json.threshold_days, $('Build alert').item.json.ticket_key] }}"
         }
@@ -402,7 +402,7 @@
         3120,
         -60
       ],
-      "id": "503dc721-eaff-4eb7-9480-6cfb691f53ae",
+      "id": "46d715bd-be80-4f7d-891b-6495dd9c56f8",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -425,7 +425,7 @@
         3120,
         120
       ],
-      "id": "f155d436-e381-4cf6-b309-bbd3460e3d2f",
+      "id": "aafc1e96-acca-4592-a04b-88ac7eb31884",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -448,7 +448,7 @@
         3340,
         120
       ],
-      "id": "bb2a2020-125f-47b0-a00b-ff77976d1d57",
+      "id": "7174703d-cb80-438d-9664-2469d9284532",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -488,7 +488,7 @@
         3600,
         40
       ],
-      "id": "fb6ce200-d142-40c9-ac48-f7898e690b1a",
+      "id": "2a17d129-4856-4286-8959-00a42c0cf409",
       "executeOnce": true
     },
     {
@@ -502,7 +502,7 @@
         3820,
         40
       ],
-      "id": "0fcfc880-0ca0-459c-8f4a-0e07526aabaa"
+      "id": "c0a88cdf-da3a-4b47-aa9e-8f0da13b1ffd"
     }
   ],
   "connections": {
