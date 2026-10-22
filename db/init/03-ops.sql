@@ -23,7 +23,12 @@ INSERT INTO app_config (key, value) VALUES
     ('post_empty_digest',         'false'::jsonb), -- post a "no new findings" line to Slack
     -- Workflow B (spend report): local model for the summary
     ('ollama_url',                '"http://host.docker.internal:11434"'::jsonb),
-    ('ollama_summary_model',      '"llama3.1:8b"'::jsonb)
+    ('ollama_summary_model',      '"llama3.1:8b"'::jsonb),
+    -- Workflow D (renewal alerts); Jira stays off until jira_enabled is true and these three are filled in
+    ('slack_channel_renewals',    '"#license-reports"'::jsonb),
+    ('jira_base_url',             '""'::jsonb),            -- e.g. https://yourcompany.atlassian.net
+    ('jira_project_key',          '""'::jsonb),            -- e.g. LIC
+    ('jira_issue_type',           '"Task"'::jsonb)
 ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS workflow_runs (
