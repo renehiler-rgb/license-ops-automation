@@ -13,8 +13,14 @@ INSERT INTO app_config (key, value) VALUES
     ('anthropic_model',       '"claude-haiku-5-5"'::jsonb),
     ('inactive_days',         '30'::jsonb),
     ('renewal_thresholds',    '[90, 60, 30]'::jsonb),
-    ('slack_channel_alerts',  '"#license-alerts"'::jsonb),
-    ('slack_channel_reports', '"#license-reports"'::jsonb)
+    ('slack_channel_alerts',  '"#automation-alerts"'::jsonb),
+    ('slack_channel_reports', '"#license-reports"'::jsonb),
+    -- Workflow A (usage audit)
+    ('usage_initial_days',        '120'::jsonb),   -- first sync: how far back to pull usage
+    ('new_account_grace_days',    '14'::jsonb),    -- accounts younger than this are never "inactive"
+    ('mismatch_window_days',      '30'::jsonb),    -- window for the premium-seat check
+    ('mismatch_min_avg_activity', '3'::jsonb),     -- premium seat below this daily average is a mismatch
+    ('post_empty_digest',         'false'::jsonb)  -- post a "no new findings" line to Slack
 ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS workflow_runs (
