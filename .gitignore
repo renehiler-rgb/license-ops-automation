@@ -22,3 +22,6 @@ plan/
 
 # Local-only guide
 docs/setup-steps.md
+
+# Local compose override (machine specific)
+docker-compose.override.yml

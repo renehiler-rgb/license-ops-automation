@@ -3,7 +3,7 @@ services:
     image: docker.n8n.io/n8nio/n8n:2.43.8
     restart: unless-stopped
     ports:
-      - "127.0.0.1:5678:5678"
+      - "127.0.0.1:${N8N_PORT:-5678}:5678"
     env_file: .env
     environment:
       - GENERIC_TIMEZONE=Europe/Belgrade
@@ -26,7 +26,7 @@ services:
       POSTGRES_USER: licenseops
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
@@ -40,7 +40,7 @@ services:
     build: ./mock-vendors
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${MOCK_PORT:-8000}:8000"
     volumes:
       - ./data:/data:ro
     environment:
@@ -60,8 +60,7 @@ services:
       retries: 10
 
 volumes:
-  # Existing volume from the old ~/n8n stack (keeps workflows and credentials)
+  # A normal named volume for everyone. The maintainer's machine reuses an older n8n volume through
+  # docker-compose.override.yml (gitignored, see docs/manual-setup.md).
   n8n_data:
-    external: true
-    name: n8n_n8n_data
   pg_data:
