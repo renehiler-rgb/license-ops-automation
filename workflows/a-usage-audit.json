@@ -1,0 +1,729 @@
+{
+  "id": "OvM6bln7DPJ1jBV0",
+  "name": "A - Usage audit",
+  "nodes": [
+    {
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Schedule 06:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 6 * * *"
+            }
+          ]
+        }
+      },
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jsonb_object_agg(key, value) as cfg from app_config;",
+        "options": {}
+      },
+      "name": "Config",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      },
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Last sync\" node (Postgres, Execute Query). No parameters.\n-- For each tool: the date to ask the vendor for usage from = newest stored day minus 2 days\n-- (the overlap is safe because usage upserts are idempotent). First run: usage_initial_days back.\n-- Also returns run_started_at, used later to resolve findings that were not seen in this run.\nSELECT\n    now() AS run_started_at,\n    jsonb_object_agg(\n        lower(split_part(t.name, ' ', 1)),\n        to_char(\n            COALESCE(\n                (SELECT max(u.day) - 2\n                 FROM usage_daily u JOIN accounts a ON a.id = u.account_id\n                 WHERE a.tool_id = t.id),\n                current_date - COALESCE((SELECT (value #>> '{}')::int FROM app_config\n                                         WHERE key = 'usage_initial_days'), 120)\n            ),\n            'YYYY-MM-DD')\n    ) AS since\nFROM tools t;\n",
+        "options": {}
+      },
+      "name": "Last sync",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      },
+      "position": [
+        440,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://mock-vendors:8000/hr/employees",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.page >= $response.body.total_pages }}",
+              "maxRequests": 200
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "page_size",
+              "value": "200"
+            }
+          ]
+        }
+      },
+      "name": "HR employees",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ZRwADNv2vgCL9Cog",
+          "name": "HR API Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "position": [
+        700,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://mock-vendors:8000/v1/chatterly/users",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "cursor",
+                    "value": "={{ $response.body.next_cursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !($response.body.next_cursor) }}",
+              "maxRequests": 200
+            }
+          }
+        }
+      },
+      "name": "Chatterly users",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ch53h48eClkSM6Hh",
+          "name": "Chatterly API Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "position": [
+        700,
+        230
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://mock-vendors:8000/v1/chatterly/usage",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "cursor",
+                    "value": "={{ $response.body.next_cursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !($response.body.next_cursor) }}",
+              "maxRequests": 200
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "from",
+              "value": "={{ $('Last sync').first().json.since.chatterly }}"
+            }
+          ]
+        }
+      },
+      "name": "Chatterly usage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ch53h48eClkSM6Hh",
+          "name": "Chatterly API Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "position": [
+        940,
+        230
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://mock-vendors:8000/v1/designhub/users",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "cursor",
+                    "value": "={{ $response.body.cursor?.next }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !($response.body.cursor?.next) }}",
+              "maxRequests": 200
+            }
+          }
+        }
+      },
+      "name": "DesignHub users",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "KJDrsKEe2g8mXlJP",
+          "name": "DesignHub API Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "position": [
+        700,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://mock-vendors:8000/v1/designhub/usage",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "cursor",
+                    "value": "={{ $response.body.cursor?.next }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !($response.body.cursor?.next) }}",
+              "maxRequests": 200
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "from",
+              "value": "={{ $('Last sync').first().json.since.designhub }}"
+            }
+          ]
+        }
+      },
+      "name": "DesignHub usage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "KJDrsKEe2g8mXlJP",
+          "name": "DesignHub API Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "position": [
+        940,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://mock-vendors:8000/v2/codeforge/members",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.members?.length === 0 }}",
+              "maxRequests": 200
+            }
+          }
+        }
+      },
+      "name": "CodeForge members",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "Kbm7NgBCBluOaWn2",
+          "name": "Code Forge"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "position": [
+        700,
+        490
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://mock-vendors:8000/v2/codeforge/activity",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.events?.length === 0 }}",
+              "maxRequests": 200
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "since",
+              "value": "={{ $('Last sync').first().json.since.codeforge }}"
+            }
+          ]
+        }
+      },
+      "name": "CodeForge activity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "Kbm7NgBCBluOaWn2",
+          "name": "Code Forge"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "position": [
+        940,
+        490
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://mock-vendors:8000/v2/meetspace/members",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.results?.length === 0 }}",
+              "maxRequests": 200
+            }
+          }
+        }
+      },
+      "name": "MeetSpace members",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "Z9HK0GAmZxDC5bvV",
+          "name": "MeetSpace"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "position": [
+        700,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://mock-vendors:8000/v2/meetspace/activity",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.results?.length === 0 }}",
+              "maxRequests": 200
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "since",
+              "value": "={{ $('Last sync').first().json.since.meetspace }}"
+            }
+          ]
+        }
+      },
+      "name": "MeetSpace activity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "Z9HK0GAmZxDC5bvV",
+          "name": "MeetSpace"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "position": [
+        940,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- One row per failed fetch and execution; a re-run of the same execution does not add another.\nINSERT INTO dead_letter (workflow, node, payload, error)\nSELECT 'A - Usage audit', $1, $2::jsonb, $3\nWHERE NOT EXISTS (\n    SELECT 1 FROM dead_letter\n    WHERE workflow = 'A - Usage audit' AND node = $1 AND status = 'open'\n      AND payload->>'execution_id' = $4\n);",
+        "options": {
+          "queryReplacement": "={{ [ $prevNode.name, JSON.stringify({ execution_id: String($execution.id), http_status: $json.error?.httpCode ?? $json.error?.response?.status ?? null }), String($json.error?.message ?? $json.error ?? 'unknown error'), String($execution.id) ] }}"
+        }
+      },
+      "name": "Insert dead_letter",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      },
+      "position": [
+        1250,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule 06:30": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Last sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Last sync": {
+      "main": [
+        [
+          {
+            "node": "HR employees",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Chatterly users",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Chatterly usage",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "DesignHub users",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "DesignHub usage",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "CodeForge members",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "CodeForge activity",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "MeetSpace members",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "MeetSpace activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HR employees": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Insert dead_letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatterly users": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Insert dead_letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatterly usage": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Insert dead_letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DesignHub users": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Insert dead_letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DesignHub usage": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Insert dead_letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CodeForge members": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Insert dead_letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CodeForge activity": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Insert dead_letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MeetSpace members": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Insert dead_letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MeetSpace activity": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Insert dead_letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Belgrade",
+    "errorWorkflow": "AAfHCW209bZ5161k"
+  }
+}
