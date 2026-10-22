@@ -10,7 +10,7 @@
         0,
         0
       ],
-      "id": "ab6f1e32-66ba-4475-8a72-e36e78549ae8"
+      "id": "5f10d282-a358-4aae-9a18-a86e4bd3b2bc"
     },
     {
       "parameters": {
@@ -30,7 +30,7 @@
         0,
         160
       ],
-      "id": "caaea9af-cb97-460d-8b4f-814e436986e8"
+      "id": "7aa55001-3e99-41cb-b77e-33d48940266c"
     },
     {
       "parameters": {
@@ -45,7 +45,7 @@
         240,
         80
       ],
-      "id": "df4bf255-0e93-4abf-9410-826ffd12bf77",
+      "id": "233c6845-0e90-4c98-8a43-af668e14f0a8",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -81,7 +81,7 @@
         460,
         80
       ],
-      "id": "06184b14-1e80-4e32-bbf3-d317be4dac40"
+      "id": "9d423816-23f7-44d8-b891-d15192ad48b3"
     },
     {
       "parameters": {
@@ -96,7 +96,7 @@
         680,
         80
       ],
-      "id": "3206ae62-0105-43c3-a4fe-e4545b2f4a13",
+      "id": "852bfea3-3395-42e2-9438-237ab4645431",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -135,7 +135,7 @@
         900,
         80
       ],
-      "id": "e5c18e5f-3edb-4775-ac29-b084c267ec22"
+      "id": "9bd7ff37-b4de-435b-b4ae-0daa1c8658b1"
     },
     {
       "parameters": {
@@ -152,7 +152,7 @@
         1120,
         0
       ],
-      "id": "9743063a-d3d8-46a3-825f-6baf803f5ef6",
+      "id": "5abc59b7-37c5-4865-a107-0ce5a9f5be99",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -191,7 +191,7 @@
         1340,
         0
       ],
-      "id": "3e0ab65d-1a57-461a-8ce6-5ac8e11922e7"
+      "id": "caf358aa-8ece-4672-a185-deb3bd32cd9b"
     },
     {
       "parameters": {
@@ -223,7 +223,7 @@
         1560,
         -80
       ],
-      "id": "4c8e65f9-ad4d-4535-bea5-d3e4af26a01a"
+      "id": "8e9a4b71-1c6d-4600-a0f8-0438874b60b9"
     },
     {
       "parameters": {
@@ -256,7 +256,7 @@
         1780,
         -160
       ],
-      "id": "a4977c11-bbfb-49a6-8e2d-6ad1a2ed303c",
+      "id": "87431eec-31ef-4c22-88c0-ce004924abd2",
       "credentials": {
         "jiraSoftwareCloudApi": {
           "id": "r3ocR5qWUYrvKBx0",
@@ -280,7 +280,7 @@
         2000,
         -160
       ],
-      "id": "4ad92d77-bf2d-4410-9b46-b8ebc06b0048"
+      "id": "597e202b-9a6b-4094-87b7-d5deeb9cad1e"
     },
     {
       "parameters": {
@@ -312,7 +312,7 @@
         2220,
         -160
       ],
-      "id": "5e8e9a40-c51d-4cf6-a38e-a6fc4688affa"
+      "id": "bfdd0345-2da7-4801-8369-e45f69cf87ab"
     },
     {
       "parameters": {
@@ -332,7 +332,7 @@
         2440,
         -240
       ],
-      "id": "bde19d5d-a66c-4af2-b8f2-690fc1578a4a",
+      "id": "83d92414-a542-43cc-b569-ab3d5fa4a27b",
       "credentials": {
         "jiraSoftwareCloudApi": {
           "id": "r3ocR5qWUYrvKBx0",
@@ -353,7 +353,7 @@
         2680,
         0
       ],
-      "id": "39b95e21-f9f4-43d4-813e-b7e94ce505ee"
+      "id": "25b78148-45e6-4ef7-8123-5cbd51989e26"
     },
     {
       "parameters": {
@@ -375,7 +375,7 @@
         2900,
         0
       ],
-      "id": "715627d8-7186-4ac2-9e8c-3b8d3e6ea4fd",
+      "id": "5c8e820c-2598-42a3-9172-51d707b2d4d3",
       "credentials": {
         "slackApi": {
           "id": "8hrTthMYaMAUFbva",
@@ -402,7 +402,7 @@
         3120,
         -60
       ],
-      "id": "16589604-256d-44ba-88ab-18cf53f3a4c8",
+      "id": "503dc721-eaff-4eb7-9480-6cfb691f53ae",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -425,7 +425,7 @@
         3120,
         120
       ],
-      "id": "37dfa190-0fcc-4c3f-b2e3-239bb2bca6ef",
+      "id": "f155d436-e381-4cf6-b309-bbd3460e3d2f",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -448,7 +448,7 @@
         3340,
         120
       ],
-      "id": "23676ae7-e6d3-4b36-888a-b28cdfd02935",
+      "id": "bb2a2020-125f-47b0-a00b-ff77976d1d57",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -470,9 +470,9 @@
             "workflow": "={{ $workflow.name }}",
             "execution_id": "={{ String($execution.id) }}",
             "items_in": "={{ $('Find due contracts').all().filter(i => i.json.contract_id).length }}",
-            "items_out": "={{ $('Record alert').isExecuted ? $('Record alert').all().length : 0 }}",
+            "items_out": "={{ (() => { if (!$('Record alert').isExecuted) return 0; let n = 0; for (let r = 0; ; r++) { try { n += $('Record alert').all(0, r).length; } catch (e) { break; } } return n; })() }}",
             "status": "={{ $('Release claim').isExecuted ? 'partial' : 'success' }}",
-            "notes": "={{ ($('Record alert').isExecuted ? $('Record alert').all().length + ' alert(s) sent' : 'nothing due') + ($('Release claim').isExecuted ? ', ' + $('Release claim').all().length + ' failed, will retry' : '') }}"
+            "notes": "={{ (() => { if (!$('Record alert').isExecuted) return 0; let n = 0; for (let r = 0; ; r++) { try { n += $('Record alert').all(0, r).length; } catch (e) { break; } } return n; })() + ' alert(s) sent' + ((() => { if (!$('Release claim').isExecuted) return 0; let n = 0; for (let r = 0; ; r++) { try { n += $('Release claim').all(0, r).length; } catch (e) { break; } } return n; })() ? ', ' + (() => { if (!$('Release claim').isExecuted) return 0; let n = 0; for (let r = 0; ; r++) { try { n += $('Release claim').all(0, r).length; } catch (e) { break; } } return n; })() + ' failed, will retry' : '') }}"
           },
           "matchingColumns": [],
           "schema": [],
@@ -488,7 +488,7 @@
         3600,
         40
       ],
-      "id": "3a1fc4ce-7a81-41e3-8b41-4896a99f6a38",
+      "id": "fb6ce200-d142-40c9-ac48-f7898e690b1a",
       "executeOnce": true
     },
     {
@@ -502,7 +502,7 @@
         3820,
         40
       ],
-      "id": "12729632-7e53-4df8-82bb-dc0279d9f136"
+      "id": "0fcfc880-0ca0-459c-8f4a-0e07526aabaa"
     }
   ],
   "connections": {

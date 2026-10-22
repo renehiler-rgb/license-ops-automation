@@ -51,4 +51,5 @@ With `jira_enabled` false the Jira nodes never run.
 1. Run D: 3 alerts (the planted contracts at the 90, 60 and 30-day marks). `select * from renewal_alerts;` shows 3 rows.
 2. Run D again: "nothing due", no Slack post.
 3. Slack failure: set `slack_channel_renewals` to a channel that does not exist and delete one `renewal_alerts` row. The run fails, the row stays deleted, `dead_letter` has an entry. Fix the channel and run again: the alert is sent.
-4. Missed day: insert `(contract_id, 90)` for a contract at 59 days and run: it alerts for 60 once.
+4. Jira (with `jira_enabled` true): the first run creates one ticket, at the 90-day alert. A second run creates none. If you delete that contract's `renewal_alerts` row and run again, the alert is re-sent but the existing ticket is reused, not duplicated.
+5. Missed day: insert `(contract_id, 90)` for a contract at 59 days and run: it alerts for 60 once.
