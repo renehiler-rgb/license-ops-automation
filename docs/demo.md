@@ -4,7 +4,7 @@ Three ways to see this project, from least to most effort.
 
 ## 1. Read it (no setup)
 
-- Screenshots and a short screen recording: `docs/images/` (to be added).
+- Screenshots and a short screen recording: `docs/images/` (to be added), and the [architecture](architecture.md).
 - One page per workflow in `docs/`.
 - Workflow JSON in `workflows/`, importable into any n8n instance.
 
@@ -12,16 +12,16 @@ Three ways to see this project, from least to most effort.
 
 Follow the Quickstart in the [README](../README.md). Everything runs locally with synthetic data, and nothing connects to the author's machine.
 
-Suggested tour once it is running:
+Suggested tour once `scripts/bootstrap.sh` has run (it imports the workflows for you):
 
-1. Open n8n at <http://localhost:5678> and import the files in `workflows/`.
-2. Run the contract expiry workflow manually and inspect each node's output.
+1. Open n8n at <http://localhost:5678>, open **A - Usage audit** and click Execute workflow. Inspect each node's output, then run `.venv/bin/python scripts/check_audit.py`.
+2. Request the spend report and ask the contracts a question (the commands are in the README, step 5).
 3. Query the data directly:
    ```bash
    docker compose exec postgres psql -U licenseops -d licenseops
    ```
 4. Check the mock vendor API: `curl -s localhost:8000/health`.
-5. Raise `CHAOS_RATE` in `.env` (for example `0.3`), restart the stack, and watch the workflows deal with failing vendor calls.
+5. Raise `CHAOS_RATE` in `.env` (for example `0.3`), run `docker compose up -d mock-vendors`, and watch the workflows deal with failing vendor calls.
 
 ## 3. Live demo with the author
 

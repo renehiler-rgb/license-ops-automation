@@ -29,10 +29,12 @@ Check yours: `ip -4 addr show docker0`. If it is not `172.17.0.1`, use your addr
    ```
    sudo ufw allow from 172.16.0.0/12 to 172.17.0.1 port 11434 proto tcp
    ```
-4. Pull the embedding model:
+4. Pull the default models (the embedding model, and the model that extracts contracts, answers questions and writes the finance summary):
    ```
    ollama pull nomic-embed-text
+   ollama pull llama3.1:8b
    ```
+   Optional, clearly better answers about contracts (about 19 GB, fits a 24 GB GPU): `ollama pull qwen2.5:32b`, then set `ollama_extract_model` and `ollama_summary_model` in `app_config` to `qwen2.5:32b`.
 
 ## Verify
 
