@@ -28,7 +28,10 @@ INSERT INTO app_config (key, value) VALUES
     ('slack_channel_renewals',    '"#license-reports"'::jsonb),
     ('jira_base_url',             '""'::jsonb),            -- e.g. https://yourcompany.atlassian.net
     ('jira_project_key',          '""'::jsonb),            -- e.g. LIC
-    ('jira_issue_type',           '"Task"'::jsonb)
+    ('jira_issue_type',           '"Task"'::jsonb),
+    -- Workflow C (contract intake and questions): local models used for embeddings and the Ollama fallback
+    ('ollama_embed_model',        '"nomic-embed-text"'::jsonb),
+    ('ollama_extract_model',      '"llama3.1:8b"'::jsonb)
 ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS workflow_runs (
