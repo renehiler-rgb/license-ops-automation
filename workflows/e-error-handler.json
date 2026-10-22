@@ -83,7 +83,12 @@
         880,
         0
       ],
-      "notes": "Attach your Slack credential here."
+      "credentials": {
+        "slackApi": {
+          "id": "8hrTthMYaMAUFbva",
+          "name": "Slack account"
+        }
+      }
     }
   ],
   "connections": {
