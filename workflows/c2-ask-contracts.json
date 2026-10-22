@@ -19,8 +19,8 @@
         0,
         0
       ],
-      "id": "3b4d0b1f-949f-486b-a805-ef8bdbde6fde",
-      "webhookId": "72296cb0-9aa8-4f60-9784-569b19943ac4"
+      "id": "21f7e82e-7189-457e-a110-15253a39ae3d",
+      "webhookId": "ceb6494b-7111-4a84-b632-62295c2a8016"
     },
     {
       "parameters": {
@@ -37,14 +37,14 @@
         0,
         200
       ],
-      "id": "8683e8b9-0002-4337-9ae2-42342f345d65",
+      "id": "9980979c-1873-47ca-ae80-6e56db9ff722",
       "credentials": {
         "httpHeaderAuth": {
           "id": "nsb9huAfp5Ah596o",
           "name": "Intake webhook key"
         }
       },
-      "webhookId": "98a8de52-07b2-4245-a3dd-c59b719bceba"
+      "webhookId": "3cd74a9e-6914-467c-a829-13e6aa980f40"
     },
     {
       "parameters": {
@@ -57,7 +57,7 @@
         220,
         100
       ],
-      "id": "85adb9ba-90f5-4db3-9b95-94df9eaff6e9"
+      "id": "c9786235-458a-4433-bd99-f3e15d402063"
     },
     {
       "parameters": {
@@ -89,7 +89,7 @@
         440,
         100
       ],
-      "id": "087585c4-8dfa-4b3b-92d7-595dba1a336d"
+      "id": "9698a070-68a7-4d86-adb2-511bf4f2bd48"
     },
     {
       "parameters": {
@@ -102,7 +102,7 @@
         660,
         300
       ],
-      "id": "abde568b-fefd-4552-8f1e-34f8bfa23ea3"
+      "id": "04c5b378-c7b5-4a04-afd5-25e6dac83ee6"
     },
     {
       "parameters": {
@@ -117,7 +117,7 @@
         660,
         60
       ],
-      "id": "bcb5aae1-1116-4229-b186-e9bf8c493d11",
+      "id": "b1a81156-9c86-4db4-ba09-25b538a01d65",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -153,7 +153,7 @@
         880,
         60
       ],
-      "id": "4983a21a-154a-4212-84c9-ab45146b4e75"
+      "id": "e78b3956-c985-45b1-9289-91629c4c30b6"
     },
     {
       "parameters": {
@@ -173,7 +173,7 @@
         1100,
         60
       ],
-      "id": "2dd795af-1e7a-4fd3-b3d3-4b52ac62fb76",
+      "id": "6c5fafac-f42e-4a9c-9f73-2f1521af3a05",
       "retryOnFail": true,
       "maxTries": 2,
       "waitBetweenTries": 2000,
@@ -194,7 +194,7 @@
         1320,
         60
       ],
-      "id": "b9694c5a-1539-4c8a-9623-70cc6a02fe1a",
+      "id": "64218eab-69cd-4b07-9bb9-6f01aea4803d",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -216,7 +216,7 @@
         1540,
         60
       ],
-      "id": "8b1a587d-38c3-40da-aee3-676207058ff0",
+      "id": "50d347d4-93f6-4332-9bf2-0c4151ed0356",
       "credentials": {
         "postgres": {
           "id": "AhiED7cuq2sS3DZ6",
@@ -236,7 +236,7 @@
         1760,
         60
       ],
-      "id": "db00680e-f271-4491-b698-06b2ba4bf749"
+      "id": "95d88f5e-c7cd-4e24-bc36-7f6988305485"
     },
     {
       "parameters": {
@@ -268,7 +268,7 @@
         1980,
         60
       ],
-      "id": "fbf4aeb1-26da-405d-8418-9dc783e357fe"
+      "id": "88e49f86-caf6-4a2d-bd44-f9e58e50e6a3"
     },
     {
       "parameters": {
@@ -303,7 +303,7 @@
         2200,
         0
       ],
-      "id": "fd4e748b-51e8-4d85-b86e-848776112d1b",
+      "id": "98814628-d6dd-41a3-97b1-35eb31a746cd",
       "credentials": {
         "httpHeaderAuth": {
           "id": "ANTHROPIC_CRED_ID",
@@ -333,7 +333,7 @@
         2200,
         140
       ],
-      "id": "72f970e9-ef6f-4948-951e-b5e08bd24c80",
+      "id": "498e0d5e-2693-4be7-adce-a5c9df11f622",
       "retryOnFail": true,
       "maxTries": 2,
       "waitBetweenTries": 3000,
@@ -341,7 +341,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Code node \"Format answer\"  (mode: Run Once for All Items)\n// Input : the answer of the LLM node (Claude or Ollama), or an error item if the call failed.\n// Output: ONE item { http_status, answer, sources, source }.\n//   sources = the retrieved passages whose file the answer actually cites (none when the answer is \"not in the contracts\").\n\nconst built = $('Build answer request').first().json;\nconst source = $('Read question').first().json.source;\nconst response = $input.first().json;\n\nlet answer = null;\nif (!response.error) {\n  answer = built.provider === 'anthropic'\n    ? (response.content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('\\n').trim()\n    : String(response.message?.content ?? '').trim();\n}\n\nif (!answer) {\n  return [{ json: { http_status: 502, source, sources: [],\n    answer: 'Sorry, I could not get an answer from the language model right now. Please try again in a moment.' } }];\n}\n\nconst refused = /that is not in the contracts/i.test(answer);\n\n// A passage counts as cited when the answer names its file (with or without .pdf) or its contract reference.\nconst mentions = (text) => answer.includes(text);\nconst seen = new Set();\nconst sources = [];\nif (!refused) {\n  for (const c of built.chunks) {\n    const cited = mentions(c.filename) || mentions(c.filename.replace(/\\.pdf$/i, ''));\n    const key = `${c.filename}|${c.section}`;\n    if (cited && !seen.has(key)) { seen.add(key); sources.push(c); }\n  }\n  // citations of the structured table: [contracts table, NW-CHT-001]\n  for (const m of answer.matchAll(/\\[contracts table,\\s*([A-Z0-9-]+)\\]/gi)) {\n    const key = `contracts table|${m[1]}`;\n    if (!seen.has(key)) { seen.add(key); sources.push({ filename: 'contracts table', section: m[1] }); }\n  }\n}\n\nreturn [{ json: { http_status: 200, source, answer, sources } }];\n"
+        "jsCode": "// Code node \"Format answer\"  (mode: Run Once for All Items)\n// Input : the answer of the LLM node (Claude or Ollama), or an error item if the call failed.\n// Output: ONE item { http_status, answer, sources, source }.\n//   sources = the retrieved passages whose file the answer actually cites (none when the answer is \"not in the contracts\").\n\nconst built = $('Build answer request').first().json;\nconst source = $('Read question').first().json.source;\nconst response = $input.first().json;\n\nlet answer = null;\nif (!response.error) {\n  answer = built.provider === 'anthropic'\n    ? (response.content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('\\n').trim()\n    : String(response.message?.content ?? '').trim();\n}\n\nif (!answer) {\n  return [{ json: { http_status: 502, source, sources: [],\n    answer: 'Sorry, I could not get an answer from the language model right now. Please try again in a moment.' } }];\n}\n\nconst refused = /that is not in the contracts/i.test(answer);\n\n// A passage counts as cited when the answer names its file (with or without .pdf) and one of the section titles\n// it covers. If the answer names a file but no section, the best-matching passage of that file is used.\nconst mentions = (text) => answer.includes(text);\nconst seen = new Set();\nconst sources = [];\nif (!refused) {\n  const fileNames = [...new Set(built.chunks.map((c) => c.filename))].filter((f) => mentions(f) || mentions(f.replace(/\\.pdf$/i, '')));\n  for (const file of fileNames) {\n    const ofFile = built.chunks.filter((c) => c.filename === file);          // already ordered by similarity\n    const bySection = ofFile.filter((c) => c.section.split(' / ').some((title) => answer.includes(title)));\n    for (const c of (bySection.length ? bySection : [ofFile[0]])) {\n      const key = `${c.filename}|${c.section}`;\n      if (!seen.has(key)) { seen.add(key); sources.push(c); }\n    }\n  }\n  // citations of the structured table: [contracts table, NW-CHT-001]\n  for (const m of answer.matchAll(/\\[contracts table,\\s*([A-Z0-9-]+)\\]/gi)) {\n    const key = `contracts table|${m[1]}`;\n    if (!seen.has(key)) { seen.add(key); sources.push({ filename: 'contracts table', section: m[1] }); }\n  }\n}\n\nreturn [{ json: { http_status: 200, source, answer, sources } }];\n"
       },
       "name": "Format answer",
       "type": "n8n-nodes-base.code",
@@ -350,7 +350,7 @@
         2420,
         60
       ],
-      "id": "d074bf21-b043-4cc5-8b87-3064fed2e1d1"
+      "id": "693d3357-c893-4162-94d5-701a20f787eb"
     },
     {
       "parameters": {
@@ -384,7 +384,7 @@
         2640,
         60
       ],
-      "id": "0f725bb4-0afd-4319-9931-24ba67553170"
+      "id": "957e551a-c712-4d5a-8057-6f3a478f96c6"
     },
     {
       "parameters": {
@@ -397,7 +397,7 @@
         2860,
         160
       ],
-      "id": "34894a12-ec17-47d7-9a24-42e0113a034d"
+      "id": "04911823-b7c8-45ea-9ef0-48b27a52facd"
     },
     {
       "parameters": {
@@ -429,7 +429,7 @@
         3080,
         160
       ],
-      "id": "879d8d16-1899-4dab-a50c-71aee4a7f661"
+      "id": "b9cdb4ca-9670-4151-8085-bc58e6fb5a21"
     },
     {
       "parameters": {
@@ -446,7 +446,7 @@
         3300,
         100
       ],
-      "id": "d4cf3c7a-f923-4890-8a4f-8721cdfee5c3"
+      "id": "f1d33403-582c-44e1-a2de-0f922d148f40"
     },
     {
       "parameters": {
@@ -469,7 +469,7 @@
         3300,
         240
       ],
-      "id": "b82740bf-ccc4-4d29-84e0-01b1b62a2ecd"
+      "id": "6589aa5e-342f-40aa-8e6d-2e7376ca0170"
     }
   ],
   "connections": {

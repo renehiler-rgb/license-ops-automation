@@ -21,15 +21,20 @@ if (!answer) {
 
 const refused = /that is not in the contracts/i.test(answer);
 
-// A passage counts as cited when the answer names its file (with or without .pdf) or its contract reference.
+// A passage counts as cited when the answer names its file (with or without .pdf) and one of the section titles
+// it covers. If the answer names a file but no section, the best-matching passage of that file is used.
 const mentions = (text) => answer.includes(text);
 const seen = new Set();
 const sources = [];
 if (!refused) {
-  for (const c of built.chunks) {
-    const cited = mentions(c.filename) || mentions(c.filename.replace(/\.pdf$/i, ''));
-    const key = `${c.filename}|${c.section}`;
-    if (cited && !seen.has(key)) { seen.add(key); sources.push(c); }
+  const fileNames = [...new Set(built.chunks.map((c) => c.filename))].filter((f) => mentions(f) || mentions(f.replace(/\.pdf$/i, '')));
+  for (const file of fileNames) {
+    const ofFile = built.chunks.filter((c) => c.filename === file);          // already ordered by similarity
+    const bySection = ofFile.filter((c) => c.section.split(' / ').some((title) => answer.includes(title)));
+    for (const c of (bySection.length ? bySection : [ofFile[0]])) {
+      const key = `${c.filename}|${c.section}`;
+      if (!seen.has(key)) { seen.add(key); sources.push(c); }
+    }
   }
   // citations of the structured table: [contracts table, NW-CHT-001]
   for (const m of answer.matchAll(/\[contracts table,\s*([A-Z0-9-]+)\]/gi)) {

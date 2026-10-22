@@ -62,7 +62,10 @@ if (data) {
     && !(Number.isInteger(data.notice_days) && data.notice_days >= 0 && data.notice_days <= 365)) {
     errors.push(`bad_notice_days: ${data.notice_days} (expected 0 to 365)`);
   }
-  if (data.currency && !CURRENCIES.includes(String(data.currency).toUpperCase())) errors.push(`unknown_currency: ${data.currency}`);
+  // Accept common ways of writing a currency and turn them into the ISO code.
+  const CURRENCY_NAMES = { 'US DOLLARS': 'USD', 'US DOLLAR': 'USD', 'DOLLARS': 'USD', '$': 'USD', 'EURO': 'EUR', 'EUROS': 'EUR', '€': 'EUR', 'POUNDS': 'GBP', '£': 'GBP' };
+  if (typeof data.currency === 'string') data.currency = CURRENCY_NAMES[data.currency.trim().toUpperCase()] ?? data.currency.trim().toUpperCase();
+  if (data.currency && !CURRENCIES.includes(data.currency)) errors.push(`unknown_currency: ${data.currency}`);
   if (data.billing_cycle && !['monthly', 'annual'].includes(data.billing_cycle)) errors.push(`bad_billing_cycle: ${data.billing_cycle}`);
   if (data.product && !knownTools.includes(String(data.product).trim().toLowerCase())) {
     errors.push(`unknown_product: "${data.product}" is not a tool we manage`);
@@ -107,7 +110,7 @@ const status = llmFailed ? 'failed' : (errors.length > 0 ? 'needs_review' : 'ext
 const clean = data && {
   document_type: data.document_type, vendor: data.vendor, product: data.product, contract_ref: data.contract_ref,
   start_date: data.start_date, end_date: data.end_date, seats: data.seats, price_per_seat: data.price_per_seat,
-  currency: data.currency ? String(data.currency).toUpperCase() : null, billing_cycle: data.billing_cycle,
+  currency: data.currency ?? null, billing_cycle: data.billing_cycle,
   auto_renew: data.auto_renew, notice_days: data.notice_days, owner: data.owner ?? null,
 };
 

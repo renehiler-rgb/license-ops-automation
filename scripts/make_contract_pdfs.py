@@ -87,8 +87,10 @@ def table(rows: list[list[str]], widths: list[float]) -> Table:
 
 
 def build_pdf(path: Path, story: list) -> None:
+    # invariant=1 leaves out the creation time and random id, so the same input always gives the same bytes
+    # (and the same sha256, which the intake workflow uses to detect duplicates).
     doc = SimpleDocTemplate(str(path), pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm,
-                            topMargin=18 * mm, bottomMargin=18 * mm)
+                            topMargin=18 * mm, bottomMargin=18 * mm, invariant=1)
     doc.build(story)
 
 
@@ -206,8 +208,8 @@ def layout_messy(c: dict, tool: dict) -> list:
               [60 * mm, 20 * mm, 40 * mm, 30 * mm]),
         Spacer(1, 8),
         Paragraph("Termination, service levels and data", HEADING),
-        Paragraph("Each party may terminate for uncured material breach after thirty (30) days' written notice. "
-                  "The Provider targets 99.5% monthly availability. Personal data is processed under the data "
+        Paragraph("Either party may terminate if the other commits a material breach that stays uncured for thirty (30) "
+                  "consecutive days. The Provider targets 99.5% monthly availability. Personal data is processed under the data "
                   "processing addendum attached to this agreement and is deleted on termination.", BODY),
     ]
 
