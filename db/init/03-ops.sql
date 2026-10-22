@@ -9,8 +9,8 @@ CREATE TABLE IF NOT EXISTS app_config (
 -- Seed values. DO NOTHING keeps any value you changed later.
 INSERT INTO app_config (key, value) VALUES
     ('jira_enabled',          'false'::jsonb),
-    ('llm_provider',          '"anthropic"'::jsonb),
-    ('anthropic_model',       '"claude-haiku-5-5"'::jsonb),
+    ('llm_provider',          '"ollama"'::jsonb),            -- everything runs locally; "anthropic" is an optional switch
+    ('anthropic_model',       '"claude-haiku-5-5"'::jsonb),  -- only used when llm_provider is "anthropic"
     ('inactive_days',         '30'::jsonb),
     ('renewal_thresholds',    '[90, 60, 30]'::jsonb),
     ('slack_channel_alerts',  '"#automation-alerts"'::jsonb),
