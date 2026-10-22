@@ -45,4 +45,5 @@ Slack slash commands would need a public endpoint; this n8n is deliberately priv
 ## Known limits
 - A model can misread a document. The checks above catch most of it, but for a **new** contract (no existing record to compare with) a plausible wrong value, for example the 30-day breach period read as the notice period, would pass. `docs/failure-testing.md` shows this with the deliberately messy sample. Use a stronger model, or review low-confidence documents.
 - Scanned PDFs without text are sent to review (no OCR).
+- Measured quality is in [rag-evaluation.md](rag-evaluation.md) (`scripts/eval_rag.py`): retrieval hit@1 64%, answers correct 88%, out-of-scope questions refused 100%.
 - The answers are only as good as the local model. `llama3.1:8b` answers are loose; `qwen2.5:32b` is clearly better (see failure-testing.md).

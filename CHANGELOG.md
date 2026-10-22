@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- `scripts/eval_rag.py` and `docs/rag-evaluation.md`: 20-question evaluation of the contract Q&A (retrieval hit@k and MRR, answer correctness, citations, refusals).
+
 ## v1.0.0
 
 First release.

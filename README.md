@@ -39,7 +39,7 @@ Details, per-workflow diagrams and the data model: [docs/architecture.md](docs/a
 
 ## Reliability
 
-This is the part the project is built around. Each item below was tested by breaking it on purpose; the results are in [docs/failure-testing.md](docs/failure-testing.md).
+This is the part the project is built around. Each item below was tested by breaking it on purpose; the results are in [docs/failure-testing.md](docs/failure-testing.md). The contract Q&A has a measured evaluation (retrieval hit rate, answer correctness, refusals): [docs/rag-evaluation.md](docs/rag-evaluation.md).
 
 - **Idempotent writes.** Every write has a natural key and `ON CONFLICT`. Every workflow was run twice and created zero duplicates.
 - **Retries and partial results.** Vendor calls retry; a vendor that stays down is skipped, recorded in `dead_letter`, named in the Slack digest, and the run is marked `partial`.
