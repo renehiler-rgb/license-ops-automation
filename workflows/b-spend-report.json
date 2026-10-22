@@ -1,0 +1,759 @@
+{
+  "name": "B - Spend report",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "f70d29e0-1126-44bf-9e43-01ce55f38329"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 8 1 * *"
+            }
+          ]
+        }
+      },
+      "name": "Schedule 1st 08:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        160
+      ],
+      "id": "73be5dd8-169b-4148-bffe-a7e5e4ffeedf"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "spend-report",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook spend-report",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        320
+      ],
+      "id": "24db4ac8-68f8-4b3a-8702-9e1a4d3d584e",
+      "webhookId": "27395f68-1760-48d7-b5c6-f5b61ec6d2fc"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Resolve month\"  (mode: Run Once for All Items)\n// Input : the Webhook (POST /webhook/spend-report, body {\"month\": \"2026-09\"}), the schedule or the manual trigger.\n// Output: ONE item { valid, error, month_start: \"2026-09-01\", month_label: \"2026-09\" }.\n//   Schedule / manual run: the previous calendar month.\n//   Webhook run: the month from the body; it must look like YYYY-MM and must not be in the future.\n\nconst pad = (n) => String(n).padStart(2, '0');\nconst now = new Date();\nconst thisMonth = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;\n\n// Previous month as \"YYYY-MM\"\nconst prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);\nconst previousMonth = `${prev.getFullYear()}-${pad(prev.getMonth() + 1)}`;\n\nconst body = $input.first().json.body ?? {};\nconst requested = body.month === undefined ? previousMonth : String(body.month).trim();\n\nlet error = null;\nif (!/^\\d{4}-(0[1-9]|1[0-2])$/.test(requested)) error = 'month must look like 2026-09';\nelse if (requested > thisMonth) error = `month ${requested} is in the future`;\n\nreturn [{\n  json: {\n    valid: error === null,\n    error,\n    month_start: `${requested}-01`,\n    month_label: requested,\n  },\n}];\n"
+      },
+      "name": "Resolve month",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        160
+      ],
+      "id": "bfd5ef4e-8efe-4700-b520-bfb748ad459a"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Month valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        460,
+        160
+      ],
+      "id": "79fff6fe-bd09-4e8a-8c7f-46d17a3ea8bd"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: $json.error }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "name": "Respond 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        320
+      ],
+      "id": "61a41788-b57b-4f26-8124-ad3364630731"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jsonb_object_agg(key, value) as cfg from app_config;",
+        "options": {}
+      },
+      "name": "Config",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        680,
+        160
+      ],
+      "id": "1f87b2fc-da33-4f11-8c4b-d759e426ca20",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "cdgAF4motzMJqhNh",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "start",
+            "workflow": "={{ $workflow.name }}",
+            "execution_id": "={{ String($execution.id) }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "name": "Run log start",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        900,
+        160
+      ],
+      "id": "5cb1a2d9-5614-4bde-ab17-c7bf93d5d1b4"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Compute report\" node (Postgres, Execute Query) of workflow B.\n-- $1 = first day of the reporting month, e.g. '2026-09-01'.\n-- Returns ONE row, column \"report\": { month, by_tool: [...], by_team_tool: [...] }.\n-- by_tool has one row per tool with budget, variance, cost per active user, idle cost and the\n-- change against the previous month. by_team_tool is the per-team breakdown (also used for the CSV).\nWITH tool_month AS (\n    -- all months, so the previous month is available for the comparison\n    SELECT tool_id, tool, month,\n           sum(committed)    AS committed,\n           sum(usage_spend)  AS usage_spend,\n           sum(actual)       AS actual,\n           sum(budget)       AS budget,\n           sum(accounts)     AS accounts,\n           sum(active_users) AS active_users,\n           sum(idle_cost)    AS idle_cost\n    FROM v_budget_variance\n    GROUP BY tool_id, tool, month\n),\ntool_report AS (\n    SELECT t.*,\n           lag(t.actual) OVER (PARTITION BY t.tool_id ORDER BY t.month) AS prev_actual\n    FROM tool_month t\n),\nby_tool AS (\n    SELECT jsonb_agg(jsonb_build_object(\n               'tool', tool,\n               'committed', round(committed, 2),\n               'usage_spend', round(usage_spend, 2),\n               'actual', round(actual, 2),\n               'budget', round(budget, 2),\n               'variance', round(actual - budget, 2),\n               'variance_pct', round(100 * (actual - budget) / NULLIF(budget, 0), 1),\n               'accounts', accounts,\n               'active_users', active_users,\n               'cost_per_active_user', round(actual / NULLIF(active_users, 0), 2),\n               'idle_cost', round(idle_cost, 2),\n               'prev_actual', round(prev_actual, 2),\n               'mom_change', round(actual - prev_actual, 2),\n               'mom_pct', round(100 * (actual - prev_actual) / NULLIF(prev_actual, 0), 1)\n           ) ORDER BY tool) AS rows\n    FROM tool_report\n    WHERE month = $1::date\n),\nby_team_tool AS (\n    SELECT jsonb_agg(jsonb_build_object(\n               'team', team, 'tool', tool,\n               'actual', actual, 'budget', budget,\n               'variance', variance, 'variance_pct', variance_pct,\n               'accounts', accounts, 'active_users', active_users,\n               'cost_per_active_user', cost_per_active_user,\n               'idle_cost', idle_cost\n           ) ORDER BY team, tool) AS rows\n    FROM v_budget_variance\n    WHERE month = $1::date\n)\nSELECT jsonb_build_object(\n           'month', to_char($1::date, 'YYYY-MM'),\n           'by_tool', COALESCE((SELECT rows FROM by_tool), '[]'::jsonb),\n           'by_team_tool', COALESCE((SELECT rows FROM by_team_tool), '[]'::jsonb)\n       ) AS report;\n",
+        "options": {
+          "queryReplacement": "={{ [$('Resolve month').first().json.month_start] }}"
+        }
+      },
+      "name": "Compute report",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1120,
+        160
+      ],
+      "id": "2b2825d6-9ed5-4e9e-9ef1-fd918c4bd339",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Shape report\"  (mode: Run Once for All Items)\n// Input : the row from \"Compute report\" ({ report: { month, by_tool, by_team_tool } }).\n// Output: ONE item { month, totals, by_tool, by_team_tool }.\n//   totals = overall numbers, top 3 variances, top 3 idle-cost tools, biggest month-over-month movers.\n// \"totals\" is what gets stored in monthly_reports and (aggregates only) sent to the local model.\n\nconst report = $input.first().json.report;\nconst byTool = report.by_tool ?? [];\nconst byTeamTool = report.by_team_tool ?? [];\nif (byTool.length === 0) throw new Error(`No spend data for ${report.month}`);\n\nconst round2 = (x) => Math.round(Number(x) * 100) / 100;\nconst usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });\nconst sum = (rows, key) => round2(rows.reduce((total, row) => total + Number(row[key] ?? 0), 0));\nconst pct = (part, whole) => (whole ? Math.round((part / whole) * 1000) / 10 : null);\n\n// Overall\nconst actual = sum(byTool, 'actual');\nconst budget = sum(byTool, 'budget');\nconst activeUsers = sum(byTool, 'active_users');\nconst prevActual = sum(byTool.filter((t) => t.prev_actual !== null), 'prev_actual');\nconst overall = {\n  actual, budget,\n  variance: round2(actual - budget),\n  variance_pct: pct(actual - budget, budget),\n  committed: sum(byTool, 'committed'),\n  usage_spend: sum(byTool, 'usage_spend'),\n  active_users: activeUsers,\n  cost_per_active_user: activeUsers ? round2(actual / activeUsers) : null,\n  idle_cost: sum(byTool, 'idle_cost'),\n  prev_actual: prevActual || null,\n  mom_change: prevActual ? round2(actual - prevActual) : null,\n  mom_pct: prevActual ? pct(actual - prevActual, prevActual) : null,\n};\n\n// Top 3 team + tool combinations over budget (only rows that have a budget)\nconst topVariances = byTeamTool\n  .filter((r) => r.budget !== null && Number(r.variance) > 0)\n  .sort((a, b) => b.variance - a.variance)\n  .slice(0, 3)\n  .map((r) => ({ team: r.team, tool: r.tool, actual: r.actual, budget: r.budget, variance: r.variance, variance_pct: r.variance_pct }));\n\n// Teams whose total across all tools is over budget\nconst teamTotals = {};\nfor (const r of byTeamTool.filter((row) => row.budget !== null)) {\n  const t = (teamTotals[r.team] ??= { actual: 0, budget: 0 });\n  t.actual += Number(r.actual);\n  t.budget += Number(r.budget);\n}\nconst teamsOverBudget = Object.entries(teamTotals)\n  .filter(([, t]) => t.actual > t.budget)\n  .map(([team, t]) => ({ team, variance: round2(t.actual - t.budget), variance_pct: pct(t.actual - t.budget, t.budget) }))\n  .sort((a, b) => b.variance - a.variance);\n\n// Top 3 tools by idle cost\nconst topIdle = [...byTool]\n  .sort((a, b) => b.idle_cost - a.idle_cost)\n  .slice(0, 3)\n  .map((t) => ({ tool: t.tool, idle_cost: t.idle_cost }));\n\n// Biggest month-over-month movers (needs a previous month)\nconst momMovers = byTool\n  .filter((t) => t.mom_change !== null)\n  .sort((a, b) => Math.abs(b.mom_change) - Math.abs(a.mom_change))\n  .slice(0, 3)\n  .map((t) => ({ tool: t.tool, mom_change: t.mom_change, mom_pct: t.mom_pct, actual: t.actual, prev_actual: t.prev_actual }));\n\nconst totals = {\n  month: report.month,\n  currency: 'USD',\n  overall,\n  teams_over_budget: teamsOverBudget,\n  top_variances: topVariances,\n  top_idle_tools: topIdle,\n  mom_movers: momMovers,\n};\n\nreturn [{ json: { month: report.month, totals, by_tool: byTool, by_team_tool: byTeamTool, total_text: usd.format(actual) } }];\n"
+      },
+      "name": "Shape report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        160
+      ],
+      "id": "d2cdf4c4-7640-4d04-b56f-5931dcded20d"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Build Ollama request\"  (mode: Run Once for All Items)\n// Input : \"Shape report\" (and \"Config\" for the model name).\n// Output: ONE item { request } -> the HTTP node sends  {{ JSON.stringify($json.request) }}  to Ollama /api/chat.\n// Only aggregated numbers go to the model: tool and team names with money, never people or emails.\n// \"format\" is a JSON schema, so Ollama is forced to answer in that shape.\n\nconst cfg = $('Config').first().json.cfg;\nconst t = $('Shape report').first().json.totals;\n\nconst facts = {\n  month: t.month,\n  currency: t.currency,\n  overall: t.overall,\n  teams_over_budget: t.teams_over_budget,\n  top_variances_team_and_tool: t.top_variances,\n  top_idle_cost_tools: t.top_idle_tools,\n  biggest_month_over_month_changes: t.mom_movers,\n};\n\nconst schema = {\n  type: 'object',\n  properties: {\n    headline: { type: 'string' },\n    three_points: { type: 'array', items: { type: 'string' }, minItems: 3, maxItems: 3 },\n    recommended_action: { type: 'string' },\n  },\n  required: ['headline', 'three_points', 'recommended_action'],\n};\n\nconst request = {\n  model: cfg.ollama_summary_model ?? 'llama3.1:8b',\n  stream: false,\n  format: schema,\n  options: { temperature: 0.2 },\n  messages: [\n    {\n      role: 'system',\n      content: 'You are a finance analyst writing a short monthly software-spend summary for a finance team. '\n        + 'Use ONLY the numbers in the data you are given, copied exactly. Never calculate new numbers or percentages and never invent figures. Money is in USD. '\n        + 'Answer with: a one-sentence headline, exactly three short points, and one recommended action.',\n    },\n    { role: 'user', content: `Monthly license spend data (JSON):\\n${JSON.stringify(facts)}` },\n  ],\n};\n\nreturn [{ json: { request } }];\n"
+      },
+      "name": "Build Ollama request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        160
+      ],
+      "id": "48d5e062-c468-433d-832e-060d17bc46f3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.cfg.ollama_url }}/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Build Ollama request').first().json.request) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "name": "Ollama summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        160
+      ],
+      "id": "87a2c745-4fe0-4cea-9143-cb91fb965bb9",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Check summary\" (first try) and \"Check summary retry\" (second try). Same code in both  (mode: Run Once for All Items)\n// Input : the answer of the Ollama HTTP node. If Ollama was unreachable the item holds an \"error\" instead.\n// Output: ONE item { ok, source, summary: { headline, three_points, recommended_action }, reason }.\n//   First try fails      -> ok = false, the workflow asks Ollama once more.\n//   Second try fails too -> a summary built from a template, source = 'template'. The report is never blocked.\n\n// false in \"Check summary\" (first try), true in \"Check summary retry\" (second try, falls back to the template)\nconst isRetry = false;\nconst totals = $('Shape report').first().json.totals;\nconst input = $input.first().json;\n\n// ---- 1. is the answer usable? ----\nfunction parse(response) {\n  if (response.error) return { reason: `Ollama call failed: ${response.error.message ?? response.error}` };\n  let data;\n  try {\n    data = JSON.parse(response.message?.content ?? '');\n  } catch (e) {\n    return { reason: 'answer is not valid JSON' };\n  }\n  const text = (value) => typeof value === 'string' && value.trim().length > 0;\n  if (!text(data.headline)) return { reason: 'missing headline' };\n  if (!Array.isArray(data.three_points) || data.three_points.length !== 3 || !data.three_points.every(text)) {\n    return { reason: 'three_points must be exactly 3 non-empty strings' };\n  }\n  if (!text(data.recommended_action)) return { reason: 'missing recommended_action' };\n  return {\n    summary: {\n      headline: data.headline.trim(),\n      three_points: data.three_points.map((p) => p.trim()),\n      recommended_action: data.recommended_action.trim(),\n    },\n  };\n}\n\nconst parsed = parse(input);\nif (parsed.summary) return [{ json: { ok: true, source: 'ollama', summary: parsed.summary, reason: null } }];\nif (!isRetry) return [{ json: { ok: false, source: null, summary: null, reason: parsed.reason } }];\n\n// ---- 2. template summary (second failure) ----\nconst usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });\nconst signed = (n) => `${n >= 0 ? '+' : '-'}${usd.format(Math.abs(n))}`;\nconst o = totals.overall;\nconst top = totals.top_variances[0];\nconst idle = totals.top_idle_tools[0];\nconst mover = totals.mom_movers[0];\n\nconst points = [\n  top\n    ? `Largest overspend: ${top.team} on ${top.tool}, ${signed(top.variance)} over budget.`\n    : 'No team is over budget on any tool.',\n  idle\n    ? `Idle seats cost ${usd.format(o.idle_cost)} in total; most of it is ${idle.tool} (${usd.format(idle.idle_cost)}).`\n    : 'No idle seats were found.',\n  mover\n    ? `Biggest change from last month: ${mover.tool}, ${signed(mover.mom_change)}.`\n    : 'No previous month to compare with.',\n];\nconst summary = {\n  headline: `${totals.month}: ${usd.format(o.actual)} spent against a ${usd.format(o.budget)} budget `\n    + `(${o.variance >= 0 ? '+' : ''}${o.variance_pct ?? 0}%).`,\n  three_points: points,\n  recommended_action: idle\n    ? `Review the idle ${idle.tool} seats and reclaim the unused ones.`\n    : 'No action needed this month.',\n};\nreturn [{ json: { ok: true, source: 'template', summary, reason: parsed.reason } }];\n"
+      },
+      "name": "Check summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        160
+      ],
+      "id": "52b65dd8-66a4-4eab-bd6f-ee949a82fa93"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Summary ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2220,
+        160
+      ],
+      "id": "e6852ad0-2f97-4df9-ae22-3943ad50064d"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.cfg.ollama_url }}/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Build Ollama request').first().json.request) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "name": "Ollama summary retry",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2440,
+        320
+      ],
+      "id": "2d53927d-e6fd-4869-94e2-61236bfbd3d8",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Check summary\" (first try) and \"Check summary retry\" (second try). Same code in both  (mode: Run Once for All Items)\n// Input : the answer of the Ollama HTTP node. If Ollama was unreachable the item holds an \"error\" instead.\n// Output: ONE item { ok, source, summary: { headline, three_points, recommended_action }, reason }.\n//   First try fails      -> ok = false, the workflow asks Ollama once more.\n//   Second try fails too -> a summary built from a template, source = 'template'. The report is never blocked.\n\n// false in \"Check summary\" (first try), true in \"Check summary retry\" (second try, falls back to the template)\nconst isRetry = true;\nconst totals = $('Shape report').first().json.totals;\nconst input = $input.first().json;\n\n// ---- 1. is the answer usable? ----\nfunction parse(response) {\n  if (response.error) return { reason: `Ollama call failed: ${response.error.message ?? response.error}` };\n  let data;\n  try {\n    data = JSON.parse(response.message?.content ?? '');\n  } catch (e) {\n    return { reason: 'answer is not valid JSON' };\n  }\n  const text = (value) => typeof value === 'string' && value.trim().length > 0;\n  if (!text(data.headline)) return { reason: 'missing headline' };\n  if (!Array.isArray(data.three_points) || data.three_points.length !== 3 || !data.three_points.every(text)) {\n    return { reason: 'three_points must be exactly 3 non-empty strings' };\n  }\n  if (!text(data.recommended_action)) return { reason: 'missing recommended_action' };\n  return {\n    summary: {\n      headline: data.headline.trim(),\n      three_points: data.three_points.map((p) => p.trim()),\n      recommended_action: data.recommended_action.trim(),\n    },\n  };\n}\n\nconst parsed = parse(input);\nif (parsed.summary) return [{ json: { ok: true, source: 'ollama', summary: parsed.summary, reason: null } }];\nif (!isRetry) return [{ json: { ok: false, source: null, summary: null, reason: parsed.reason } }];\n\n// ---- 2. template summary (second failure) ----\nconst usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });\nconst signed = (n) => `${n >= 0 ? '+' : '-'}${usd.format(Math.abs(n))}`;\nconst o = totals.overall;\nconst top = totals.top_variances[0];\nconst idle = totals.top_idle_tools[0];\nconst mover = totals.mom_movers[0];\n\nconst points = [\n  top\n    ? `Largest overspend: ${top.team} on ${top.tool}, ${signed(top.variance)} over budget.`\n    : 'No team is over budget on any tool.',\n  idle\n    ? `Idle seats cost ${usd.format(o.idle_cost)} in total; most of it is ${idle.tool} (${usd.format(idle.idle_cost)}).`\n    : 'No idle seats were found.',\n  mover\n    ? `Biggest change from last month: ${mover.tool}, ${signed(mover.mom_change)}.`\n    : 'No previous month to compare with.',\n];\nconst summary = {\n  headline: `${totals.month}: ${usd.format(o.actual)} spent against a ${usd.format(o.budget)} budget `\n    + `(${o.variance >= 0 ? '+' : ''}${o.variance_pct ?? 0}%).`,\n  three_points: points,\n  recommended_action: idle\n    ? `Review the idle ${idle.tool} seats and reclaim the unused ones.`\n    : 'No action needed this month.',\n};\nreturn [{ json: { ok: true, source: 'template', summary, reason: parsed.reason } }];\n"
+      },
+      "name": "Check summary retry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2660,
+        320
+      ],
+      "id": "6183be7e-c1b9-4e4c-bde4-20f6edc8ab94"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Upsert report\" node of workflow B. Parameters in order: first day of the month, totals (JSON), summary text.\n-- The month is the key, so regenerating a month replaces the row instead of adding another.\nINSERT INTO monthly_reports (month, totals, summary)\nVALUES ($1::date, $2::jsonb, $3)\nON CONFLICT (month) DO UPDATE SET\n    totals     = EXCLUDED.totals,\n    summary    = EXCLUDED.summary,\n    created_at = now()\nRETURNING month, (xmax = 0) AS inserted;\n",
+        "options": {
+          "queryReplacement": "={{ [ $('Resolve month').first().json.month_start, JSON.stringify({ ...$('Shape report').first().json.totals, summary_source: ($('Check summary retry').isExecuted ? $('Check summary retry') : $('Check summary')).first().json.source }), ($('Check summary retry').isExecuted ? $('Check summary retry') : $('Check summary')).first().json.summary.headline + '\\n' + ($('Check summary retry').isExecuted ? $('Check summary retry') : $('Check summary')).first().json.summary.three_points.map(p => '- ' + p).join('\\n') + '\\nAction: ' + ($('Check summary retry').isExecuted ? $('Check summary retry') : $('Check summary')).first().json.summary.recommended_action ] }}"
+        }
+      },
+      "name": "Upsert report",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2880,
+        160
+      ],
+      "id": "c18f7757-3448-4ec6-8ab8-af1562e3756b",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Build Slack report\"  (mode: Run Once for All Items)\n// Input : the summary from \"Check summary\" or \"Check summary retry\"; the numbers come from \"Shape report\".\n// Output: ONE item { text, blocks } for the Slack node:\n//   Message Type \"Blocks\", Blocks = {{ JSON.stringify({ blocks: $json.blocks }) }}, Text = {{ $json.text }}\n\n// The summary comes from the first try, or from the retry when the first answer was not usable.\nconst check = $('Check summary retry').isExecuted ? $('Check summary retry').first().json : $('Check summary').first().json;\nconst { totals, by_tool: byTool } = $('Shape report').first().json;\nconst o = totals.overall;\nconst summary = check.summary;\n\nconst usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });\nconst signedPct = (p) => (p === null || p === undefined ? 'n/a' : `${p >= 0 ? '+' : ''}${p}%`);\nconst flag = (variance) => (variance > 0 ? ':red_circle:' : ':large_green_circle:');\n\n// One \"field\" per tool: actual / budget and the variance (Slack allows 10 fields per section)\nconst fields = byTool.slice(0, 10).map((t) => ({\n  type: 'mrkdwn',\n  text: `*${t.tool}*\\n${usd.format(t.actual)} / ${usd.format(t.budget)}  ${flag(t.variance)} ${signedPct(t.variance_pct)}`,\n}));\n\nconst where = check.source === 'ollama'\n  ? 'Summary written by the local model; only aggregated numbers were sent to it.'\n  : 'Summary built from a template (the local model gave no usable answer).';\n\nconst blocks = [\n  { type: 'header', text: { type: 'plain_text', text: `Spend report ${totals.month}` } },\n  { type: 'section', text: { type: 'mrkdwn', text: `*${summary.headline}*` } },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*Total* ${usd.format(o.actual)} vs budget ${usd.format(o.budget)} (${signedPct(o.variance_pct)})`\n        + ` \u00b7 idle seats ${usd.format(o.idle_cost)}`\n        + (o.cost_per_active_user === null ? '' : ` \u00b7 ${usd.format(o.cost_per_active_user)} per active user`),\n    },\n  },\n  { type: 'section', fields },\n  { type: 'section', text: { type: 'mrkdwn', text: summary.three_points.map((p) => `\u2022 ${p}`).join('\\n') } },\n  { type: 'section', text: { type: 'mrkdwn', text: `:dart: *Recommended action:* ${summary.recommended_action}` } },\n  { type: 'context', elements: [{ type: 'mrkdwn', text: where }] },\n];\n\nreturn [{ json: { text: `Spend report ${totals.month}: ${summary.headline}`, blocks } }];\n"
+      },
+      "name": "Build Slack report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3100,
+        160
+      ],
+      "id": "505623ea-9e0d-4c09-88fb-a2fea0f3f2af"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Config').first().json.cfg.slack_channel_reports }}"
+        },
+        "messageType": "block",
+        "blocksUi": "={{ JSON.stringify({ blocks: $('Build Slack report').first().json.blocks }) }}",
+        "text": "={{ $('Build Slack report').first().json.text }}",
+        "otherOptions": {}
+      },
+      "name": "Slack report",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        3320,
+        160
+      ],
+      "id": "d9340813-1f8e-4e7a-8de9-8cd12a898497",
+      "credentials": {
+        "slackApi": {
+          "id": "8hrTthMYaMAUFbva",
+          "name": "Slack account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Make CSV\"  (mode: Run Once for All Items)\n// Input : \"Shape report\". Output: ONE item { csv, file_name } -> \"Convert to File\" (operation \"Convert to Text File\",\n//   Source Property = csv, File Name = {{ $json.file_name }}), then the Slack file upload.\n// One row per team and tool, same numbers as the report.\n\nconst { month, by_team_tool: rows } = $('Shape report').first().json;\n\nconst columns = ['team', 'tool', 'actual', 'budget', 'variance', 'variance_pct',\n  'accounts', 'active_users', 'cost_per_active_user', 'idle_cost'];\n\n// Wrap a value in quotes only when it needs them (comma, quote or line break)\nfunction cell(value) {\n  if (value === null || value === undefined) return '';\n  const text = String(value);\n  return /[\",\\n]/.test(text) ? `\"${text.replace(/\"/g, '\"\"')}\"` : text;\n}\n\nconst lines = [columns.join(',')];\nfor (const row of rows) lines.push(columns.map((c) => cell(row[c])).join(','));\n\nreturn [{ json: { csv: lines.join('\\n') + '\\n', file_name: `spend-${month}.csv` } }];\n"
+      },
+      "name": "Make CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3540,
+        160
+      ],
+      "id": "19f08b57-ab29-49a9-a021-8dacead2a9e6"
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "csv",
+        "binaryPropertyName": "data",
+        "options": {
+          "fileName": "={{ $json.file_name }}"
+        }
+      },
+      "name": "Convert to File",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        3760,
+        160
+      ],
+      "id": "e982ce0a-da49-4ae1-88c8-63f017be7bec"
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "upload",
+        "binaryData": true,
+        "binaryPropertyName": "data",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Slack report').first().json.channel }}"
+        },
+        "options": {
+          "threadTs": "={{ $('Slack report').first().json.message?.ts }}",
+          "initialComment": "Per-team breakdown"
+        }
+      },
+      "name": "Upload CSV",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        3980,
+        160
+      ],
+      "id": "b9bd27b6-7b85-4ee1-8089-5f4d94d253fc",
+      "credentials": {
+        "slackApi": {
+          "id": "8hrTthMYaMAUFbva",
+          "name": "Slack account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "cdgAF4motzMJqhNh",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "finish",
+            "workflow": "={{ $workflow.name }}",
+            "execution_id": "={{ String($execution.id) }}",
+            "items_in": "={{ $('Shape report').first().json.by_team_tool.length }}",
+            "items_out": "=1",
+            "status": "={{ ($('Check summary retry').isExecuted ? $('Check summary retry') : $('Check summary')).first().json.source === 'ollama' ? 'success' : 'partial' }}",
+            "notes": "={{ 'Report ' + $('Resolve month').first().json.month_label + ', summary by ' + ($('Check summary retry').isExecuted ? $('Check summary retry') : $('Check summary')).first().json.source }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "name": "Run log finish",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        4200,
+        160
+      ],
+      "id": "4931bb87-14fd-4c9f-932d-cceedb99bca5"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, month: $('Resolve month').first().json.month_label, summary_source: ($('Check summary retry').isExecuted ? $('Check summary retry') : $('Check summary')).first().json.source }) }}",
+        "options": {}
+      },
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        4420,
+        160
+      ],
+      "id": "a0928607-d2f7-45a2-96cb-a1ac5375ca84"
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Resolve month",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule 1st 08:30": {
+      "main": [
+        [
+          {
+            "node": "Resolve month",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook spend-report": {
+      "main": [
+        [
+          {
+            "node": "Resolve month",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve month": {
+      "main": [
+        [
+          {
+            "node": "Month valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Month valid?": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Run log start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run log start": {
+      "main": [
+        [
+          {
+            "node": "Compute report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute report": {
+      "main": [
+        [
+          {
+            "node": "Shape report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape report": {
+      "main": [
+        [
+          {
+            "node": "Build Ollama request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Ollama request": {
+      "main": [
+        [
+          {
+            "node": "Ollama summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama summary": {
+      "main": [
+        [
+          {
+            "node": "Check summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check summary": {
+      "main": [
+        [
+          {
+            "node": "Summary ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary ok?": {
+      "main": [
+        [
+          {
+            "node": "Upsert report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ollama summary retry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama summary retry": {
+      "main": [
+        [
+          {
+            "node": "Check summary retry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check summary retry": {
+      "main": [
+        [
+          {
+            "node": "Upsert report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert report": {
+      "main": [
+        [
+          {
+            "node": "Build Slack report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Slack report": {
+      "main": [
+        [
+          {
+            "node": "Slack report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack report": {
+      "main": [
+        [
+          {
+            "node": "Make CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make CSV": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Upload CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload CSV": {
+      "main": [
+        [
+          {
+            "node": "Run log finish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run log finish": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Belgrade",
+    "errorWorkflow": "AAfHCW209bZ5161k"
+  },
+  "id": "1uKlf0TVddQ6VRY1"
+}
