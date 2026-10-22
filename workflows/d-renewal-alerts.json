@@ -1,0 +1,761 @@
+{
+  "name": "D - Renewal alerts",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "ab6f1e32-66ba-4475-8a72-e36e78549ae8"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 7 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Schedule 07:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        160
+      ],
+      "id": "caaea9af-cb97-460d-8b4f-814e436986e8"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jsonb_object_agg(key, value) as cfg from app_config;",
+        "options": {}
+      },
+      "name": "Config",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        240,
+        80
+      ],
+      "id": "df4bf255-0e93-4abf-9410-826ffd12bf77",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "cdgAF4motzMJqhNh",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "start",
+            "workflow": "={{ $workflow.name }}",
+            "execution_id": "={{ String($execution.id) }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "name": "Run log start",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        460,
+        80
+      ],
+      "id": "06184b14-1e80-4e32-bbf3-d317be4dac40"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Find due contracts\" node of workflow D (Postgres, Execute Query). No parameters.\n-- Turn on \"Always Output Data\" so the workflow still finishes when nothing is due.\n--\n-- A contract is due when its notice deadline (end date minus notice days) is at most N days away,\n-- for a threshold N in app_config.renewal_thresholds (default 90, 60, 30), and that threshold has\n-- not been alerted yet. \"At most\" (not \"exactly\") means a missed day, for example the machine\n-- being off, still gets its alert on the next run instead of never.\n-- A contract gets ONE alert per run: the tightest threshold it fits (89 days left -> 90, 59 -> 60).\n-- Contracts that already ended are ignored. A deadline already passed shows days_left < 0.\nWITH today AS (\n    SELECT (now() AT TIME ZONE 'Europe/Belgrade')::date AS day\n),\nthresholds AS (\n    SELECT t::int AS threshold_days\n    FROM jsonb_array_elements_text(\n             COALESCE((SELECT value FROM app_config WHERE key = 'renewal_thresholds'), '[90, 60, 30]'::jsonb)\n         ) AS t\n),\ncontract_days AS (\n    SELECT c.id AS contract_id,\n           (c.end_date - c.notice_days) - today.day AS days_left\n    FROM contracts c, today\n    WHERE c.end_date >= today.day\n),\npicked AS (\n    SELECT cd.contract_id, cd.days_left,\n           (SELECT min(threshold_days) FROM thresholds WHERE threshold_days >= cd.days_left) AS threshold_days\n    FROM contract_days cd\n)\nSELECT p.contract_id, p.threshold_days, p.days_left, c.contract_ref, t.name AS tool\nFROM picked p\nJOIN contracts c ON c.id = p.contract_id\nJOIN tools t ON t.id = c.tool_id\nWHERE p.threshold_days IS NOT NULL\n  AND NOT EXISTS (SELECT 1 FROM renewal_alerts r\n                  WHERE r.contract_id = p.contract_id AND r.threshold_days = p.threshold_days)\nORDER BY p.days_left, c.contract_ref;\n",
+        "options": {}
+      },
+      "name": "Find due contracts",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        680,
+        80
+      ],
+      "id": "3206ae62-0105-43c3-a4fe-e4545b2f4a13",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.contract_id !== undefined && $json.contract_id !== null }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        900,
+        80
+      ],
+      "id": "e5c18e5f-3edb-4775-ac29-b084c267ec22"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Claim alert\" node of workflow D. Parameters in order: contract_id, threshold_days.\n-- The alert is claimed BEFORE it is sent. The primary key (contract_id, threshold_days) lets only one run\n-- insert the row; a second run (or an overlapping one) gets no row back and stops here, so a duplicate\n-- alert is impossible. If sending fails the claim is released again (see release_claim.sql).\n-- Returns the contract details used for the message and the Jira ticket.\nWITH claimed AS (\n    INSERT INTO renewal_alerts (contract_id, threshold_days)\n    VALUES ($1::int, $2::int)\n    ON CONFLICT (contract_id, threshold_days) DO NOTHING\n    RETURNING contract_id, threshold_days\n)\nSELECT cl.contract_id, cl.threshold_days,\n       c.contract_ref, t.name AS tool, t.vendor, c.seats, c.price_per_seat, c.billing_cycle,\n       round(c.seats * c.price_per_seat * 12, 2) AS annual_value,\n       c.start_date, c.end_date, c.notice_days, c.auto_renew, c.owner_email,\n       (c.end_date - c.notice_days) AS notice_deadline,\n       (c.end_date - c.notice_days) - (now() AT TIME ZONE 'Europe/Belgrade')::date AS days_left\nFROM claimed cl\nJOIN contracts c ON c.id = cl.contract_id\nJOIN tools t ON t.id = c.tool_id;\n",
+        "options": {
+          "queryReplacement": "={{ [$json.contract_id, $json.threshold_days] }}"
+        }
+      },
+      "name": "Claim alert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "9743063a-d3d8-46a3-825f-6baf803f5ef6",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.contract_id !== undefined && $json.contract_id !== null }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Claimed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1340,
+        0
+      ],
+      "id": "3e0ab65d-1a57-461a-8ce6-5ac8e11922e7"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Config').first().json.cfg.jira_enabled === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Jira enabled?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1560,
+        -80
+      ],
+      "id": "4c8e65f9-ad4d-4535-bea5-d3e4af26a01a"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').first().json.cfg.jira_base_url }}/rest/api/3/search/jql",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "jiraSoftwareCloudApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "jql",
+              "value": "={{ 'project = \"' + $('Config').first().json.cfg.jira_project_key + '\" AND labels = \"' + $json.contract_ref + '\" AND statusCategory != Done' }}"
+            },
+            {
+              "name": "fields",
+              "value": "key"
+            },
+            {
+              "name": "maxResults",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Jira search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        -160
+      ],
+      "id": "a4977c11-bbfb-49a6-8e2d-6ad1a2ed303c",
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "r3ocR5qWUYrvKBx0",
+          "name": "Jira SW Cloud account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Plan ticket\"  (mode: Run Once for Each Item)   [only runs when jira_enabled is true]\n// Input : the answer of \"Jira search\" (open issues with the contract's label). The contract comes from \"Claim alert\".\n// Output: { create, existing_key, jira_note, ticket } -> \"Create ticket?\" -> \"Jira create\".\n// Rules:\n//   - an open issue with the contract label exists -> reuse its key, never create a second one\n//   - the search itself failed -> do NOT create (we cannot tell if one exists), say so in the note\n//   - no open issue -> create one, but only at the first (largest) threshold, the 90-day mark\n\nconst contract = $('Claim alert').item.json;\nconst cfg = $('Config').first().json.cfg;\nconst search = $json;\n\nif (search.error) {\n  return { json: { create: false, existing_key: null, jira_note: `Jira search failed: ${search.error.message ?? search.error}` } };\n}\nconst found = (search.issues ?? [])[0];\nif (found) return { json: { create: false, existing_key: found.key, jira_note: null } };\n\nconst first = Math.max(...(cfg.renewal_thresholds ?? [90]));\nif (contract.threshold_days !== first) {\n  return { json: { create: false, existing_key: null, jira_note: null } };\n}\n\nconst tool = `${contract.tool} (${contract.contract_ref})`;\nconst money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });\nconst ticket = {\n  fields: {\n    project: { key: cfg.jira_project_key },\n    issuetype: { name: cfg.jira_issue_type ?? 'Task' },\n    summary: `Renewal review: ${tool}, notice by ${String(contract.notice_deadline).slice(0, 10)}`,\n    description: `Contract ${contract.contract_ref} for ${contract.tool} (${contract.vendor}) ends on ${String(contract.end_date).slice(0, 10)}.\\n`\n      + `Notice deadline: ${String(contract.notice_deadline).slice(0, 10)} (${contract.days_left} days).\\n`\n      + `Seats: ${contract.seats} \u00b7 annual value ${money.format(contract.annual_value)}\\n`\n      + `Owner: ${contract.owner_email}\\n\\nPlease review usage and decide: renew, resize or cancel.\\nCreated automatically by n8n (workflow D).`,\n    labels: [contract.contract_ref, 'license-renewal'],\n  },\n};\nreturn { json: { create: true, existing_key: null, jira_note: null, ticket } };\n",
+        "mode": "runOnceForEachItem"
+      },
+      "name": "Plan ticket",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        -160
+      ],
+      "id": "4ad92d77-bf2d-4410-9b46-b8ebc06b0048"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.create }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Create ticket?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2220,
+        -160
+      ],
+      "id": "5e8e9a40-c51d-4cf6-a38e-a6fc4688affa"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.cfg.jira_base_url }}/rest/api/2/issue",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "jiraSoftwareCloudApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Plan ticket').item.json.ticket) }}",
+        "options": {}
+      },
+      "name": "Jira create",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2440,
+        -240
+      ],
+      "id": "bde19d5d-a66c-4af2-b8f2-690fc1578a4a",
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "r3ocR5qWUYrvKBx0",
+          "name": "Jira SW Cloud account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Build alert\"  (mode: Run Once for Each Item)\n// Input : $json is one of\n//   - the claimed alert itself (Jira is off),\n//   - \"Plan ticket\" output with an existing key or a note (no new ticket needed),\n//   - the answer of \"Jira create\" ({ key } or { error }).\n// Output: { contract_id, threshold_days, ticket_key, text, blocks } for the Slack node.\n\nconst c = $('Claim alert').item.json;\nconst money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });\nconst day = (value) => String(value).slice(0, 10);\n\nlet ticketKey = $json.key ?? $json.existing_key ?? '';\nlet jiraNote = $json.jira_note ?? '';\nif ($json.error) jiraNote = `Jira ticket could not be created: ${$json.error.message ?? $json.error}`;\n\nconst overdue = c.days_left < 0;\nconst when = overdue\n  ? `notice deadline *passed ${-c.days_left} days ago* (${day(c.notice_deadline)})`\n  : `notice deadline in *${c.days_left} days* (${day(c.notice_deadline)})`;\nconst outcome = c.auto_renew ? 'renews automatically unless cancelled' : 'expires unless renewed';\n\nconst lines = [\n  `:alarm_clock: *${c.tool}* (${c.vendor}), contract ${c.contract_ref}: ${when}`,\n  `The contract ends ${day(c.end_date)} and ${outcome}.`,\n];\nconst blocks = [\n  { type: 'section', text: { type: 'mrkdwn', text: lines.join('\\n') } },\n  {\n    type: 'section',\n    fields: [\n      { type: 'mrkdwn', text: `*Seats*\\n${c.seats}` },\n      { type: 'mrkdwn', text: `*Annual value*\\n${money.format(c.annual_value)} (${c.billing_cycle})` },\n      { type: 'mrkdwn', text: `*Owner*\\n${c.owner_email}` },\n      { type: 'mrkdwn', text: `*Alert level*\\n${c.threshold_days}-day notice` },\n    ],\n  },\n];\nconst context = [];\nif (ticketKey) context.push({ type: 'mrkdwn', text: `:ticket: Renewal review: *${ticketKey}*` });\nif (jiraNote) context.push({ type: 'mrkdwn', text: `:warning: ${jiraNote}` });\nif (context.length) blocks.push({ type: 'context', elements: context });\n\nreturn {\n  json: {\n    contract_id: c.contract_id,\n    threshold_days: c.threshold_days,\n    contract_ref: c.contract_ref,\n    ticket_key: ticketKey,\n    text: `${c.tool} (${c.contract_ref}): notice deadline ${overdue ? 'passed' : `in ${c.days_left} days`}`,\n    blocks,\n  },\n};\n",
+        "mode": "runOnceForEachItem"
+      },
+      "name": "Build alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2680,
+        0
+      ],
+      "id": "39b95e21-f9f4-43d4-813e-b7e94ce505ee"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Config').first().json.cfg.slack_channel_renewals }}"
+        },
+        "messageType": "block",
+        "blocksUi": "={{ JSON.stringify({ blocks: $json.blocks }) }}",
+        "text": "={{ $json.text }}",
+        "otherOptions": {}
+      },
+      "name": "Slack alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        2900,
+        0
+      ],
+      "id": "715627d8-7186-4ac2-9e8c-3b8d3e6ea4fd",
+      "credentials": {
+        "slackApi": {
+          "id": "8hrTthMYaMAUFbva",
+          "name": "Slack account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Record alert\" node of workflow D, runs after the Slack post worked.\n-- Parameters in order: contract_id, threshold_days, jira_key (empty when there is no ticket).\nUPDATE renewal_alerts\nSET jira_key = COALESCE(NULLIF($3, ''), jira_key),\n    sent_at  = now()\nWHERE contract_id = $1::int AND threshold_days = $2::int\nRETURNING contract_id, threshold_days, jira_key;\n",
+        "options": {
+          "queryReplacement": "={{ [$('Build alert').item.json.contract_id, $('Build alert').item.json.threshold_days, $('Build alert').item.json.ticket_key] }}"
+        }
+      },
+      "name": "Record alert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3120,
+        -60
+      ],
+      "id": "16589604-256d-44ba-88ab-18cf53f3a4c8",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Release claim\" node of workflow D, runs when the Slack post failed after retries.\n-- Parameters in order: contract_id, threshold_days. Deleting the claim lets the next run try again.\nDELETE FROM renewal_alerts\nWHERE contract_id = $1::int AND threshold_days = $2::int\nRETURNING contract_id;\n",
+        "options": {
+          "queryReplacement": "={{ [$('Build alert').item.json.contract_id, $('Build alert').item.json.threshold_days] }}"
+        }
+      },
+      "name": "Release claim",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3120,
+        120
+      ],
+      "id": "37dfa190-0fcc-4c3f-b2e3-239bb2bca6ef",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Insert dead_letter\" node of workflow D. Parameters in order: contract_ref, threshold_days, error text.\n-- One open row per contract and threshold, so a failing contract does not pile up rows day after day.\nINSERT INTO dead_letter (workflow, node, payload, error)\nSELECT 'D - Renewal alerts', 'Slack alert',\n       jsonb_build_object('contract_ref', $1::text, 'threshold_days', $2::int), $3\nWHERE NOT EXISTS (\n    SELECT 1 FROM dead_letter\n    WHERE workflow = 'D - Renewal alerts' AND status = 'open'\n      AND payload->>'contract_ref' = $1::text AND (payload->>'threshold_days')::int = $2::int\n);\n",
+        "options": {
+          "queryReplacement": "={{ [$('Build alert').item.json.contract_ref, $('Build alert').item.json.threshold_days, String($('Slack alert').item.json.error?.message ?? 'Slack post failed')] }}"
+        }
+      },
+      "name": "Insert dead_letter",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3340,
+        120
+      ],
+      "id": "23676ae7-e6d3-4b36-888a-b28cdfd02935",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "cdgAF4motzMJqhNh",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "finish",
+            "workflow": "={{ $workflow.name }}",
+            "execution_id": "={{ String($execution.id) }}",
+            "items_in": "={{ $('Find due contracts').all().filter(i => i.json.contract_id).length }}",
+            "items_out": "={{ $('Record alert').isExecuted ? $('Record alert').all().length : 0 }}",
+            "status": "={{ $('Release claim').isExecuted ? 'partial' : 'success' }}",
+            "notes": "={{ ($('Record alert').isExecuted ? $('Record alert').all().length + ' alert(s) sent' : 'nothing due') + ($('Release claim').isExecuted ? ', ' + $('Release claim').all().length + ' failed, will retry' : '') }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "name": "Run log finish",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3600,
+        40
+      ],
+      "id": "3a1fc4ce-7a81-41e3-8b41-4896a99f6a38",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ends the run as failed when a Slack alert could not be sent, so the error workflow alerts.\nif ($('Release claim').isExecuted) {\n  throw new Error(`Renewal alert not sent: ${$('Release claim').all().length} contract(s) will be retried on the next run (see dead_letter)`);\n}\nreturn $input.all();\n"
+      },
+      "name": "Fail if alert failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3820,
+        40
+      ],
+      "id": "12729632-7e53-4df8-82bb-dc0279d9f136"
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule 07:30": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Run log start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run log start": {
+      "main": [
+        [
+          {
+            "node": "Find due contracts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find due contracts": {
+      "main": [
+        [
+          {
+            "node": "Has alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has alerts?": {
+      "main": [
+        [
+          {
+            "node": "Claim alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run log finish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim alert": {
+      "main": [
+        [
+          {
+            "node": "Claimed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claimed?": {
+      "main": [
+        [
+          {
+            "node": "Jira enabled?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run log finish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jira enabled?": {
+      "main": [
+        [
+          {
+            "node": "Jira search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jira search": {
+      "main": [
+        [
+          {
+            "node": "Plan ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan ticket": {
+      "main": [
+        [
+          {
+            "node": "Create ticket?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create ticket?": {
+      "main": [
+        [
+          {
+            "node": "Jira create",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jira create": {
+      "main": [
+        [
+          {
+            "node": "Build alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build alert": {
+      "main": [
+        [
+          {
+            "node": "Slack alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack alert": {
+      "main": [
+        [
+          {
+            "node": "Record alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Release claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release claim": {
+      "main": [
+        [
+          {
+            "node": "Insert dead_letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record alert": {
+      "main": [
+        [
+          {
+            "node": "Run log finish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert dead_letter": {
+      "main": [
+        [
+          {
+            "node": "Run log finish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run log finish": {
+      "main": [
+        [
+          {
+            "node": "Fail if alert failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Belgrade",
+    "errorWorkflow": "AAfHCW209bZ5161k"
+  },
+  "id": "iWU45Crj4UBMZhnx"
+}
