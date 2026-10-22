@@ -47,8 +47,9 @@ step "4/8 Loading tools, employees, contracts and budgets into Postgres"
 PGPORT="$POSTGRES_PORT" .venv/bin/python scripts/load_data.py
 
 step "5/8 n8n owner account"
-SETTINGS=$(curl -fs "http://localhost:${N8N_PORT}/rest/settings" || true)
-if echo "$SETTINGS" | grep -q '"showSetupOnFirstLoad":true'; then
+NEEDS_OWNER=$(curl -fs "http://localhost:${N8N_PORT}/rest/settings" \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['userManagement']['showSetupOnFirstLoad'])" 2>/dev/null || echo "unknown")
+if [ "$NEEDS_OWNER" = "True" ]; then
   OWNER_EMAIL=$(env_value N8N_OWNER_EMAIL); OWNER_PASSWORD=$(env_value N8N_OWNER_PASSWORD)
   curl -fs -X POST "http://localhost:${N8N_PORT}/rest/owner/setup" -H 'Content-Type: application/json' \
     -d "{\"email\":\"${OWNER_EMAIL}\",\"firstName\":\"Owner\",\"lastName\":\"Northwind\",\"password\":\"${OWNER_PASSWORD}\"}" >/dev/null \
@@ -76,7 +77,10 @@ for name in $ORDER; do
   IDS="$IDS $(python3 -c "import json,sys; print(json.load(open('workflows/${name}.json'))['id'])")"
 done
 docker compose exec -T n8n rm -f /tmp/workflow.json
-for id in $IDS; do docker compose exec -T n8n n8n publish:workflow --id="$id" 2>&1 | head -1; done
+for id in $IDS; do
+  # (no "| head": with pipefail a closed pipe would stop the script)
+  docker compose exec -T n8n n8n publish:workflow --id="$id" 2>&1 | grep "Publishing workflow" || true
+done
 docker compose restart n8n >/dev/null
 for _ in $(seq 1 60); do curl -fs "http://localhost:${N8N_PORT}/healthz" >/dev/null 2>&1 && break; sleep 2; done
 
