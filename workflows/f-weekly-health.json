@@ -1,0 +1,270 @@
+{
+  "name": "F - Weekly health",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "4c5f1484-fa0a-4393-aa6b-917a62fa945d"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "name": "Schedule Mon 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        160
+      ],
+      "id": "d94487f0-608e-4254-82d9-f4b200a03d4c"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jsonb_object_agg(key, value) as cfg from app_config;",
+        "options": {}
+      },
+      "name": "Config",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        240,
+        80
+      ],
+      "id": "83bb7d7a-8777-4454-87b7-838a319dbd14",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "cdgAF4motzMJqhNh",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "start",
+            "workflow": "={{ $workflow.name }}",
+            "execution_id": "={{ String($execution.id) }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "name": "Run log start",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        460,
+        80
+      ],
+      "id": "41df9455-e5e6-4ae7-a258-dce5de477e8a"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- \"Health query\" node of workflow F (Postgres, Execute Query). No parameters.\n-- Returns ONE row, column \"health\": the last 7 days of workflow_runs and the open dead_letter items.\n--   ok       = status success\n--   partial  = finished, but a source or step failed (the run still delivered)\n--   failed   = status failed, or a run that never finished and is older than 1 hour (it crashed or was stopped)\n--   running  = not finished yet and younger than 1 hour (not counted as a failure)\n-- success_rate = ok / (runs that are not running). avg_seconds = average over finished runs.\nWITH runs AS (\n    SELECT workflow, started_at, finished_at,\n           CASE\n               WHEN status = 'success' THEN 'ok'\n               WHEN status = 'partial' THEN 'partial'\n               WHEN status = 'failed' OR (finished_at IS NULL AND started_at < now() - interval '1 hour') THEN 'failed'\n               WHEN finished_at IS NULL THEN 'running'\n               ELSE 'failed'\n           END AS outcome\n    FROM workflow_runs\n    WHERE started_at >= now() - interval '7 days'\n),\nper_workflow AS (\n    SELECT workflow,\n           count(*)                                      AS runs,\n           count(*) FILTER (WHERE outcome = 'ok')        AS ok,\n           count(*) FILTER (WHERE outcome = 'partial')   AS partial,\n           count(*) FILTER (WHERE outcome = 'failed')    AS failed,\n           count(*) FILTER (WHERE outcome = 'running')   AS running,\n           round(100.0 * count(*) FILTER (WHERE outcome = 'ok')\n                 / NULLIF(count(*) FILTER (WHERE outcome <> 'running'), 0), 1) AS success_rate,\n           round(avg(extract(epoch FROM finished_at - started_at))\n                 FILTER (WHERE finished_at IS NOT NULL)::numeric, 1)            AS avg_seconds,\n           max(started_at)                                                      AS last_run\n    FROM runs\n    GROUP BY workflow\n),\ndead AS (\n    SELECT workflow, count(*) AS open_items,\n           max(extract(day FROM now() - created_at))::int AS oldest_days\n    FROM dead_letter\n    WHERE status = 'open'\n    GROUP BY workflow\n)\nSELECT jsonb_build_object(\n    'since', to_char(now() - interval '7 days', 'YYYY-MM-DD'),\n    'workflows', COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.workflow) FROM per_workflow p), '[]'::jsonb),\n    'dead_letter_open', COALESCE((SELECT sum(open_items) FROM dead), 0),\n    'dead_letter', COALESCE((SELECT jsonb_agg(to_jsonb(d) ORDER BY d.open_items DESC) FROM dead d), '[]'::jsonb)\n) AS health;\n",
+        "options": {}
+      },
+      "name": "Health query",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        680,
+        80
+      ],
+      "id": "9fbf894c-ce43-4b59-b6ac-99ea56b90c82",
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node \"Build health report\"  (mode: Run Once for All Items)\n// Input : the row from \"Health query\" ({ health: { since, workflows, dead_letter_open, dead_letter } }).\n// Output: ONE item { text, blocks } for the Slack node:\n//   Message Type \"Blocks\", Blocks = {{ JSON.stringify({ blocks: $json.blocks }) }}, Text = {{ $json.text }}\n\nconst h = $input.first().json.health;\nconst workflows = h.workflows ?? [];\nconst deadOpen = Number(h.dead_letter_open);\n\n// Green at 100%, yellow when something only half worked, red when runs failed\nfunction icon(w) {\n  if (w.failed > 0) return ':red_circle:';\n  if (w.partial > 0) return ':large_yellow_circle:';\n  return ':large_green_circle:';\n}\nconst seconds = (s) => (s === null || s === undefined ? 'n/a' : s >= 60 ? `${Math.round(s / 6) / 10} min` : `${s} s`);\n\nconst lines = workflows.map((w) => {\n  const rate = w.success_rate === null ? 'n/a' : `${w.success_rate}%`;\n  const detail = [`${w.ok} ok`];\n  if (w.partial) detail.push(`${w.partial} partial`);\n  if (w.failed) detail.push(`${w.failed} failed`);\n  if (w.running) detail.push(`${w.running} running`);\n  return `${icon(w)} *${w.workflow}*: ${rate} success (${w.runs} runs: ${detail.join(', ')}), average ${seconds(w.avg_seconds)}`;\n});\n\nconst totalRuns = workflows.reduce((sum, w) => sum + w.runs, 0);\nconst totalBad = workflows.reduce((sum, w) => sum + w.failed + w.partial, 0);\nconst headline = totalRuns === 0\n  ? 'No workflow runs in the last 7 days'\n  : `${totalRuns} runs in the last 7 days, ${totalBad === 0 ? 'all clean' : `${totalBad} not clean`}, ${deadOpen} open dead-letter item${deadOpen === 1 ? '' : 's'}`;\n\nconst blocks = [\n  { type: 'header', text: { type: 'plain_text', text: 'Weekly workflow health' } },\n  { type: 'section', text: { type: 'mrkdwn', text: `*${headline}*` } },\n];\nif (lines.length) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: lines.join('\\n') } });\nelse blocks.push({ type: 'section', text: { type: 'mrkdwn', text: ':warning: Nothing ran. Check that the schedules are published.' } });\n\nif (deadOpen > 0) {\n  const dead = h.dead_letter.map((d) => `\u2022 ${d.workflow}: ${d.open_items} open, oldest ${d.oldest_days} days`);\n  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Open dead-letter items*\\n${dead.join('\\n')}` } });\n}\nblocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `Runs since ${h.since}. \"Partial\" means the run finished but a source or step failed.` }] });\n\nreturn [{ json: { text: `Weekly workflow health: ${headline}`, blocks } }];\n"
+      },
+      "name": "Build health report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        80
+      ],
+      "id": "54253e88-971e-49a7-b5d3-11a3b85052ba"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Config').first().json.cfg.slack_channel_alerts }}"
+        },
+        "messageType": "block",
+        "blocksUi": "={{ JSON.stringify({ blocks: $json.blocks }) }}",
+        "text": "={{ $json.text }}",
+        "otherOptions": {}
+      },
+      "name": "Slack health",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        80
+      ],
+      "id": "05bbb125-1ac0-4a9a-b03c-7d2d2eceac0d",
+      "credentials": {
+        "slackApi": {
+          "id": "8hrTthMYaMAUFbva",
+          "name": "Slack account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "cdgAF4motzMJqhNh",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "finish",
+            "workflow": "={{ $workflow.name }}",
+            "execution_id": "={{ String($execution.id) }}",
+            "items_in": "={{ $('Health query').first().json.health.workflows.length }}",
+            "items_out": "=1",
+            "notes": "={{ $('Build health report').first().json.text }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": true,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "name": "Run log finish",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1340,
+        80
+      ],
+      "id": "f1212ec1-73d0-4599-83ae-70a498457f70"
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Mon 09:00": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Run log start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run log start": {
+      "main": [
+        [
+          {
+            "node": "Health query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Health query": {
+      "main": [
+        [
+          {
+            "node": "Build health report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build health report": {
+      "main": [
+        [
+          {
+            "node": "Slack health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack health": {
+      "main": [
+        [
+          {
+            "node": "Run log finish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Belgrade",
+    "errorWorkflow": "AAfHCW209bZ5161k"
+  }
+}
