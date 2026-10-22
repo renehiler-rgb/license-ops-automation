@@ -20,7 +20,10 @@ INSERT INTO app_config (key, value) VALUES
     ('new_account_grace_days',    '14'::jsonb),    -- accounts younger than this are never "inactive"
     ('mismatch_window_days',      '30'::jsonb),    -- window for the premium-seat check
     ('mismatch_min_avg_activity', '3'::jsonb),     -- premium seat below this daily average is a mismatch
-    ('post_empty_digest',         'false'::jsonb)  -- post a "no new findings" line to Slack
+    ('post_empty_digest',         'false'::jsonb), -- post a "no new findings" line to Slack
+    -- Workflow B (spend report): local model for the summary
+    ('ollama_url',                '"http://host.docker.internal:11434"'::jsonb),
+    ('ollama_summary_model',      '"llama3.1:8b"'::jsonb)
 ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS workflow_runs (
