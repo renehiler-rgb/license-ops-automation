@@ -25,3 +25,6 @@ docs/setup-steps.md
 
 # Local compose override (machine specific)
 docker-compose.override.yml
+
+# Editor settings
+.vscode/
