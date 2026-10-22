@@ -1,0 +1,140 @@
+{
+  "name": "E - Error handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jsonb_object_agg(key, value) as cfg from app_config;",
+        "options": {}
+      },
+      "name": "Config",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turn the Error Trigger payload into a Slack message and a dead_letter row.\nconst data = $input.first().json;\nconst cfg = $('Config').first().json.cfg;\n\nconst workflowName = data.workflow?.name ?? 'unknown workflow';\nconst node = data.execution?.lastNodeExecuted ?? 'unknown node';\nconst error = data.execution?.error?.message ?? 'no error message';\nconst url = data.execution?.url ?? '';\n\nconst text = [\n  ':rotating_light: *Workflow failed*',\n  `*Workflow:* ${workflowName}`,\n  `*Failed node:* ${node}`,\n  `*Error:* ${error}`,\n  url ? `*Execution:* ${url}` : '',\n].filter(Boolean).join('\\n');\n\nreturn [{\n  json: {\n    workflow: workflowName,\n    node,\n    error,\n    text,\n    channel: cfg.slack_channel_alerts,\n    // What we know about the failed run. n8n does not hand the last node's input to the Error Trigger.\n    payload: {\n      execution_id: String(data.execution?.id ?? ''),\n      execution_url: url,\n      mode: data.execution?.mode ?? null,\n      stack: data.execution?.error?.stack ?? null,\n    },\n  },\n}];"
+      },
+      "name": "Build message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO dead_letter (workflow, node, payload, error)\nSELECT $1, $2, $3::jsonb, $4\nWHERE NOT EXISTS (\n  SELECT 1 FROM dead_letter WHERE payload->>'execution_id' = $5\n)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [$json.workflow, $json.node, JSON.stringify($json.payload), $json.error, $json.payload.execution_id] }}"
+        }
+      },
+      "name": "Insert dead_letter",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        660,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Build message').first().json.channel }}"
+        },
+        "text": "={{ $('Build message').first().json.text }}",
+        "otherOptions": {}
+      },
+      "name": "Post to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "notes": "Attach your Slack credential here."
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Build message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build message": {
+      "main": [
+        [
+          {
+            "node": "Insert dead_letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert dead_letter": {
+      "main": [
+        [
+          {
+            "node": "Post to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Belgrade"
+  },
+  "pinData": {}
+}

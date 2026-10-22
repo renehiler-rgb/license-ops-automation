@@ -1,0 +1,152 @@
+{
+  "name": "Run log (sub-workflow)",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "action"
+            },
+            {
+              "name": "workflow"
+            },
+            {
+              "name": "execution_id"
+            },
+            {
+              "name": "items_in"
+            },
+            {
+              "name": "items_out"
+            },
+            {
+              "name": "status"
+            },
+            {
+              "name": "notes"
+            }
+          ]
+        }
+      },
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "is-start",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "start",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Is start?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH ins AS (\n  INSERT INTO workflow_runs (workflow, execution_id, items_in, notes)\n  SELECT $1, $2, $3::int, $4\n  WHERE NOT EXISTS (SELECT 1 FROM workflow_runs WHERE workflow = $1 AND execution_id = $2)\n  RETURNING id\n)\nSELECT id FROM ins\nUNION ALL\nSELECT id FROM workflow_runs WHERE workflow = $1 AND execution_id = $2\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ [$json.workflow, $json.execution_id, $json.items_in ?? null, $json.notes ?? null] }}"
+        }
+      },
+      "name": "Start run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        440,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE workflow_runs\nSET finished_at = now(),\n    status      = COALESCE($3, 'success'),\n    items_in    = COALESCE($4::int, items_in),\n    items_out   = $5::int,\n    notes       = COALESCE($6, notes)\nWHERE workflow = $1 AND execution_id = $2\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [$json.workflow, $json.execution_id, $json.status ?? null, $json.items_in ?? null, $json.items_out ?? null, $json.notes ?? null] }}"
+        }
+      },
+      "name": "Finish run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        440,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "AhiED7cuq2sS3DZ6",
+          "name": "licenseops DB"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Is start?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is start?": {
+      "main": [
+        [
+          {
+            "node": "Start run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Finish run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Belgrade"
+  },
+  "pinData": {}
+}
